@@ -2235,6 +2235,7 @@
 
   // ─── Message Handling ───────────────────────────────────────────────
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === "PING") { sendResponse("PONG"); return; }
     switch (msg.type) {
       case "TOGGLE_EDIT":
         state.editActive = msg.active;

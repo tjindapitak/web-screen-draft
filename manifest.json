@@ -2,13 +2,14 @@
   "manifest_version": 3,
   "name": "Web Screen Draft",
   "version": "1.0.0",
-  "description": "Edit, move, paste, and screenshot any webpage — a tool for legal, product, and compliance teams.",
-  "homepage_url": "https://github.com/your-username/web-screen-draft",
-  "author": "Your Name",
+  "description": "Edit, annotate, draw, and screenshot any webpage with side-by-side comparisons.",
+  "homepage_url": "https://github.com/tjindapitak/web-screen-draft",
+  "author": "Thanapon Jindapitak",
   "short_name": "Web Screen Draft",
-  "privacy_policy": "https://github.com/your-username/web-screen-draft/blob/main/PRIVACY.md",
+  "privacy_policy": "https://github.com/tjindapitak/web-screen-draft/blob/main/PRIVACY.md",
   "permissions": [
     "activeTab",
+    "scripting",
     "downloads",
     "clipboardRead"
   ],
@@ -37,12 +38,10 @@
       "description": "Toggle edit mode"
     }
   },
-  "content_scripts": [
+  "web_accessible_resources": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["lib/html2canvas.min.js", "content.js"],
-      "css": ["content.css"],
-      "run_at": "document_idle"
+      "resources": ["content.css"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

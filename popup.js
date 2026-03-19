@@ -10,6 +10,10 @@
 
   let editActive = false;
 
+  async function ensureInjected() {
+    await sendToBackground({ type: "INJECT_CONTENT_SCRIPTS" });
+  }
+
   function sendToContent(message) {
     return new Promise((resolve) => {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -76,6 +80,7 @@
   }
 
   toggleBtn.addEventListener("click", async () => {
+    await ensureInjected();
     editActive = !editActive;
     updateUI();
     await sendToContent({ type: "TOGGLE_EDIT", active: editActive });
@@ -83,6 +88,7 @@
 
   // Viewport screenshot (captureVisibleTab)
   ssViewport.addEventListener("click", async () => {
+    await ensureInjected();
     setButtonLoading(ssViewport, true);
     await sendToContent({ type: "PREPARE_SCREENSHOT", showHighlights: showHighlightsCheckbox.checked });
     await new Promise((r) => setTimeout(r, 150));
@@ -92,6 +98,7 @@
 
   // Full page screenshot (html2canvas)
   ssFullPage.addEventListener("click", async () => {
+    await ensureInjected();
     setButtonLoading(ssFullPage, true);
     const result = await sendToContent({ type: "FULL_PAGE_SCREENSHOT", showHighlights: showHighlightsCheckbox.checked });
     if (result && result.dataUrl) {
@@ -106,6 +113,7 @@
 
   // Side-by-side screenshot — full page (original vs changed)
   ssSideBySide.addEventListener("click", async () => {
+    await ensureInjected();
     setButtonLoading(ssSideBySide, true);
     const result = await sendToContent({ type: "SIDE_BY_SIDE_SCREENSHOT", showHighlights: showHighlightsCheckbox.checked });
     if (result && result.dataUrl) {
@@ -120,6 +128,7 @@
 
   // Side-by-side screenshot — viewport (original vs changed)
   ssSbsViewport.addEventListener("click", async () => {
+    await ensureInjected();
     setButtonLoading(ssSbsViewport, true);
 
     // 1. Prepare changed state and capture viewport
@@ -154,15 +163,20 @@
   });
 
   resetBtn.addEventListener("click", async () => {
+    await ensureInjected();
     await sendToContent({ type: "RESET_ALL" });
     editActive = false;
     updateUI();
   });
 
-  sendToContent({ type: "GET_STATE" }).then((state) => {
-    if (state) {
-      editActive = state.editActive;
-    }
+  ensureInjected().then(() => {
+    sendToContent({ type: "GET_STATE" }).then((state) => {
+      if (state) {
+        editActive = state.editActive;
+      }
+      updateUI();
+    });
+  }).catch(() => {
     updateUI();
   });
 })();
