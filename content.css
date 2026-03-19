@@ -1,0 +1,205 @@
+/* Hover highlight for elements in edit mode */
+.sd-hover-highlight {
+  outline: 2px dashed #4f46e5 !important;
+  outline-offset: 2px !important;
+  cursor: pointer !important;
+}
+
+/* Selected element outline */
+.sd-selected {
+  outline: 2px solid #4f46e5 !important;
+  outline-offset: 2px !important;
+}
+
+/* Text editing mode — active inline editing */
+.sd-text-editing {
+  outline: 2px solid #f59e0b !important;
+  outline-offset: 2px !important;
+  cursor: text !important;
+}
+
+/* Committed text edit — bold red border */
+.sd-text-edited {
+  outline: 3px solid #ef4444 !important;
+  outline-offset: 1px !important;
+  background-color: rgba(239, 68, 68, 0.08) !important;
+}
+
+.sd-highlights-hidden .sd-text-edited {
+  outline: none !important;
+  background-color: transparent !important;
+}
+
+/* Dragging state */
+.sd-dragging {
+  opacity: 0.85 !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18) !important;
+  z-index: 2147483640 !important;
+}
+
+/* ── Editor Toolbar ─────────────────────────────────────────────── */
+.sd-editor-bar {
+  position: fixed !important;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647 !important;
+  display: flex !important;
+  gap: 4px !important;
+  background: #1e1b4b !important;
+  padding: 6px 8px !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.35) !important;
+  user-select: none !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+.sd-editor-grip {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 14px !important;
+  cursor: grab !important;
+  flex-shrink: 0 !important;
+  opacity: 0.5 !important;
+  transition: opacity 0.15s !important;
+  padding: 0 2px !important;
+  border: none !important;
+  background: none !important;
+}
+
+.sd-editor-grip:hover {
+  opacity: 1 !important;
+}
+
+.sd-editor-grip:active {
+  cursor: grabbing !important;
+}
+
+.sd-editor-btn {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 36px !important;
+  height: 36px !important;
+  border: none !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: rgba(255,255,255,0.6) !important;
+  cursor: pointer !important;
+  transition: all 0.12s ease !important;
+  padding: 0 !important;
+}
+
+.sd-editor-btn:hover {
+  background: rgba(255,255,255,0.12) !important;
+  color: #fff !important;
+}
+
+.sd-editor-btn-active {
+  background: #4f46e5 !important;
+  color: #fff !important;
+}
+
+.sd-editor-btn-active:hover {
+  background: #4338ca !important;
+}
+
+.sd-editor-sep {
+  width: 1px !important;
+  height: 20px !important;
+  background: rgba(255,255,255,0.15) !important;
+  margin: 0 2px !important;
+  flex-shrink: 0 !important;
+}
+
+.sd-editor-btn-toggle {
+  color: #ef4444 !important;
+  opacity: 1 !important;
+}
+
+.sd-editor-btn-toggle.sd-toggle-off {
+  opacity: 0.35 !important;
+}
+
+/* ── Shape Submenu ─────────────────────────────────────────────── */
+.sd-shape-submenu {
+  z-index: 2147483647 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  background: #1e1b4b !important;
+  padding: 6px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.35) !important;
+  user-select: none !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+.sd-shape-submenu .sd-editor-btn {
+  width: auto !important;
+  gap: 8px !important;
+  padding: 6px 12px 6px 8px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+
+.sd-shape-submenu .sd-editor-btn span {
+  color: inherit !important;
+}
+
+/* ── SVG Drawing Overlay ───────────────────────────────────────── */
+.sd-svg-overlay {
+  pointer-events: auto !important;
+  cursor: crosshair !important;
+}
+
+/* ── Eraser Tool ───────────────────────────────────────────────── */
+.sd-eraser-active,
+.sd-eraser-active *:not(.sd-editor-bar):not(.sd-editor-bar *):not(.sd-shape-submenu):not(.sd-shape-submenu *):not(.sd-editor-grip) {
+  cursor: none !important;
+}
+
+.sd-eraser-active .sd-editor-bar,
+.sd-eraser-active .sd-editor-bar *,
+.sd-eraser-active .sd-shape-submenu,
+.sd-eraser-active .sd-shape-submenu * {
+  cursor: pointer !important;
+}
+
+.sd-eraser-active .sd-editor-grip {
+  cursor: grab !important;
+}
+
+.sd-eraser-cursor {
+  position: fixed !important;
+  pointer-events: none !important;
+  z-index: 2147483646 !important;
+  width: 28px !important;
+  height: 28px !important;
+  border: 2px solid #dc2626 !important;
+  border-radius: 50% !important;
+  background: rgba(239, 68, 68, 0.12) !important;
+  transform: translate(-50%, -50%) !important;
+  transition: none !important;
+}
+
+.sd-eraser-trail {
+  position: absolute !important;
+  pointer-events: none !important;
+  z-index: 2147483638 !important;
+  border-radius: 50% !important;
+  background: rgba(239, 68, 68, 0.15) !important;
+}
+
+/* Hide extension UI during screenshot capture */
+.sd-capturing .sd-resize-handle,
+.sd-capturing .sd-rotate-handle,
+.sd-capturing .sd-resize-handle-container,
+.sd-capturing .sd-editor-bar,
+.sd-capturing .sd-shape-submenu,
+.sd-capturing .sd-svg-overlay,
+.sd-capturing .sd-eraser-cursor,
+.sd-capturing .sd-eraser-trail {
+  display: none !important;
+}

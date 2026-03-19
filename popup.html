@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+    <header class="header">
+      <h1>Web Screen Draft</h1>
+      <span class="badge" id="statusBadge">OFF</span>
+    </header>
+
+    <section class="controls">
+      <button id="toggleEdit" class="btn btn-primary">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M11.5 1.5L14.5 4.5L5 14H2V11L11.5 1.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>
+        Enable Edit Mode
+      </button>
+
+      <hr class="divider">
+
+      <label class="toggle-row" id="highlightToggle">
+        <input type="checkbox" id="showHighlights">
+        <span>Show red highlights in screenshot</span>
+      </label>
+
+      <div class="section-label">Viewport</div>
+      <div class="btn-row">
+        <button id="screenshotViewport" class="btn btn-secondary">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <rect x="1" y="3" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+          Capture
+        </button>
+        <button id="screenshotSbsViewport" class="btn btn-secondary">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <rect x="1" y="3" width="6" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/>
+            <rect x="9" y="3" width="6" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/>
+          </svg>
+          Compare
+        </button>
+      </div>
+
+      <div class="section-label">Full Page</div>
+      <div class="btn-row">
+        <button id="screenshotFullPage" class="btn btn-secondary">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <rect x="3" y="1" width="10" height="14" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="5" y1="4" x2="11" y2="4" stroke="currentColor" stroke-width="1"/>
+            <line x1="5" y1="6.5" x2="11" y2="6.5" stroke="currentColor" stroke-width="1"/>
+          </svg>
+          Capture
+        </button>
+        <button id="screenshotSideBySide" class="btn btn-secondary">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <rect x="1" y="2" width="6" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/>
+            <rect x="9" y="2" width="6" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/>
+          </svg>
+          Compare
+        </button>
+      </div>
+
+      <hr class="divider">
+
+      <button id="resetChanges" class="btn btn-ghost">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 2V6H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2.5 5.5A6 6 0 1 1 2 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Reset All Changes
+      </button>
+    </section>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
