@@ -1,14 +1,24 @@
 (function () {
   const toggleBtn = document.getElementById("toggleEdit");
-  const statusBadge = document.getElementById("statusBadge");
-  const ssViewport = document.getElementById("screenshotViewport");
-  const ssFullPage = document.getElementById("screenshotFullPage");
-  const ssSideBySide = document.getElementById("screenshotSideBySide");
-  const ssSbsViewport = document.getElementById("screenshotSbsViewport");
+  const statusLabel = document.getElementById("statusLabel");
+  const captureViewport = document.getElementById("captureViewport");
+  const captureFullPage = document.getElementById("captureFullPage");
   const resetBtn = document.getElementById("resetChanges");
+  const blankCanvasBtn = document.getElementById("blankCanvas");
   const showHighlightsCheckbox = document.getElementById("showHighlights");
+  const modeToggle = document.getElementById("modeToggle");
 
   let editActive = false;
+  let captureMode = "changes";
+  let activeTabIsExtension = false;
+
+  modeToggle.querySelectorAll(".seg-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      modeToggle.querySelectorAll(".seg-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      captureMode = btn.dataset.mode;
+    });
+  });
 
   async function ensureInjected() {
     await sendToBackground({ type: "INJECT_CONTENT_SCRIPTS" });
@@ -18,7 +28,11 @@
     return new Promise((resolve) => {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (!tabs[0]) return resolve(null);
-        chrome.tabs.sendMessage(tabs[0].id, message, resolve);
+        if (tabs[0].url?.startsWith("chrome-extension://")) {
+          chrome.runtime.sendMessage(message, resolve);
+        } else {
+          chrome.tabs.sendMessage(tabs[0].id, message, resolve);
+        }
       });
     });
   }
@@ -29,54 +43,32 @@
     });
   }
 
-  function setButtonLoading(btn, loading) {
+  function setLoading(btn, loading) {
     btn.disabled = loading;
+    btn.classList.toggle("loading", loading);
+    const label = btn.querySelector("span");
     if (loading) {
-      btn.dataset.origText = btn.textContent;
-      btn.textContent = "Capturing...";
+      btn.dataset.origLabel = label ? label.textContent : "";
+      if (label) label.textContent = "Capturing\u2026";
     } else {
-      btn.textContent = btn.dataset.origText || "";
+      if (label) label.textContent = btn.dataset.origLabel || "";
     }
   }
 
+  function showNoChanges(btn) {
+    const label = btn.querySelector("span");
+    const orig = label ? label.textContent : "";
+    if (label) label.textContent = "No changes";
+    btn.disabled = true;
+    setTimeout(() => {
+      if (label) label.textContent = orig;
+      btn.disabled = false;
+    }, 1500);
+  }
+
   function updateUI() {
-    if (editActive) {
-      toggleBtn.textContent = "";
-      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("width", "16");
-      svg.setAttribute("height", "16");
-      svg.setAttribute("viewBox", "0 0 16 16");
-      svg.setAttribute("fill", "none");
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", "M4 4L12 12M12 4L4 12");
-      path.setAttribute("stroke", "currentColor");
-      path.setAttribute("stroke-width", "1.5");
-      path.setAttribute("stroke-linecap", "round");
-      svg.appendChild(path);
-      toggleBtn.appendChild(svg);
-      toggleBtn.appendChild(document.createTextNode(" Disable Edit Mode"));
-      toggleBtn.classList.add("active");
-      statusBadge.textContent = "ON";
-      statusBadge.classList.add("active");
-    } else {
-      toggleBtn.textContent = "";
-      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("width", "16");
-      svg.setAttribute("height", "16");
-      svg.setAttribute("viewBox", "0 0 16 16");
-      svg.setAttribute("fill", "none");
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", "M11.5 1.5L14.5 4.5L5 14H2V11L11.5 1.5Z");
-      path.setAttribute("stroke", "currentColor");
-      path.setAttribute("stroke-width", "1.5");
-      path.setAttribute("stroke-linejoin", "round");
-      svg.appendChild(path);
-      toggleBtn.appendChild(svg);
-      toggleBtn.appendChild(document.createTextNode(" Enable Edit Mode"));
-      toggleBtn.classList.remove("active");
-      statusBadge.textContent = "OFF";
-      statusBadge.classList.remove("active");
-    }
+    toggleBtn.classList.toggle("active", editActive);
+    statusLabel.textContent = editActive ? "Active" : "Off";
   }
 
   toggleBtn.addEventListener("click", async () => {
@@ -84,22 +76,73 @@
     editActive = !editActive;
     updateUI();
     await sendToContent({ type: "TOGGLE_EDIT", active: editActive });
+    if (editActive) window.close();
   });
 
-  // Viewport screenshot (captureVisibleTab)
-  ssViewport.addEventListener("click", async () => {
-    await ensureInjected();
-    setButtonLoading(ssViewport, true);
+  // Viewport: changes-only screenshot
+  async function viewportChanges() {
+    const check = await sendToContent({ type: "HAS_CHANGES" });
+    if (!check || !check.hasChanges) {
+      showNoChanges(captureViewport);
+      return;
+    }
+    setLoading(captureViewport, true);
     await sendToContent({ type: "PREPARE_SCREENSHOT", showHighlights: showHighlightsCheckbox.checked });
     await new Promise((r) => setTimeout(r, 150));
     await sendToBackground({ type: "TAKE_SCREENSHOT" });
-    setButtonLoading(ssViewport, false);
-  });
+    await sendToContent({ type: "SCREENSHOT_DONE" });
+    setLoading(captureViewport, false);
+  }
 
-  // Full page screenshot (html2canvas)
-  ssFullPage.addEventListener("click", async () => {
-    await ensureInjected();
-    setButtonLoading(ssFullPage, true);
+  // Viewport: side-by-side
+  async function viewportSideBySide() {
+    const check = await sendToContent({ type: "HAS_CHANGES" });
+    if (!check || !check.hasChanges) {
+      showNoChanges(captureViewport);
+      return;
+    }
+    setLoading(captureViewport, true);
+
+    try {
+      await sendToContent({ type: "PREPARE_SCREENSHOT", showHighlights: showHighlightsCheckbox.checked });
+      await new Promise((r) => setTimeout(r, 150));
+      const changedResult = await sendToBackground({ type: "CAPTURE_TAB" });
+      await sendToContent({ type: "SCREENSHOT_DONE" });
+
+      await sendToContent({ type: "REVERT_TO_ORIGINAL" });
+      await new Promise((r) => setTimeout(r, 150));
+      const originalResult = await sendToBackground({ type: "CAPTURE_TAB" });
+      await sendToContent({ type: "RESTORE_EDITS" });
+
+      if (changedResult?.dataUrl && originalResult?.dataUrl) {
+        const composed = await sendToContent({
+          type: "COMPOSE_SIDE_BY_SIDE",
+          originalUrl: originalResult.dataUrl,
+          changedUrl: changedResult.dataUrl,
+        });
+        if (composed?.dataUrl) {
+          await sendToBackground({
+            type: "DOWNLOAD_DATA_URL",
+            dataUrl: composed.dataUrl,
+            filename: "web-screen-draft-viewport-compare-" + Date.now() + ".png",
+          });
+        }
+      }
+    } catch (err) {
+      console.error("[WebScreenDraft] viewportSideBySide error:", err);
+    }
+
+    setLoading(captureViewport, false);
+  }
+
+  // Full page: changes-only screenshot
+  async function fullPageChanges() {
+    const check = await sendToContent({ type: "HAS_CHANGES" });
+    if (!check || !check.hasChanges) {
+      showNoChanges(captureFullPage);
+      return;
+    }
+    setLoading(captureFullPage, true);
     const result = await sendToContent({ type: "FULL_PAGE_SCREENSHOT", showHighlights: showHighlightsCheckbox.checked });
     if (result && result.dataUrl) {
       await sendToBackground({
@@ -108,13 +151,17 @@
         filename: "web-screen-draft-fullpage-" + Date.now() + ".png",
       });
     }
-    setButtonLoading(ssFullPage, false);
-  });
+    setLoading(captureFullPage, false);
+  }
 
-  // Side-by-side screenshot — full page (original vs changed)
-  ssSideBySide.addEventListener("click", async () => {
-    await ensureInjected();
-    setButtonLoading(ssSideBySide, true);
+  // Full page: side-by-side
+  async function fullPageSideBySide() {
+    const check = await sendToContent({ type: "HAS_CHANGES" });
+    if (!check || !check.hasChanges) {
+      showNoChanges(captureFullPage);
+      return;
+    }
+    setLoading(captureFullPage, true);
     const result = await sendToContent({ type: "SIDE_BY_SIDE_SCREENSHOT", showHighlights: showHighlightsCheckbox.checked });
     if (result && result.dataUrl) {
       await sendToBackground({
@@ -123,43 +170,24 @@
         filename: "web-screen-draft-compare-" + Date.now() + ".png",
       });
     }
-    setButtonLoading(ssSideBySide, false);
+    setLoading(captureFullPage, false);
+  }
+
+  captureViewport.addEventListener("click", async () => {
+    await ensureInjected();
+    if (captureMode === "sidebyside") await viewportSideBySide();
+    else await viewportChanges();
   });
 
-  // Side-by-side screenshot — viewport (original vs changed)
-  ssSbsViewport.addEventListener("click", async () => {
+  captureFullPage.addEventListener("click", async () => {
     await ensureInjected();
-    setButtonLoading(ssSbsViewport, true);
+    if (captureMode === "sidebyside") await fullPageSideBySide();
+    else await fullPageChanges();
+  });
 
-    // 1. Prepare changed state and capture viewport
-    await sendToContent({ type: "PREPARE_SCREENSHOT", showHighlights: showHighlightsCheckbox.checked });
-    await new Promise((r) => setTimeout(r, 150));
-    const changedResult = await sendToBackground({ type: "CAPTURE_TAB" });
-    await sendToContent({ type: "SCREENSHOT_DONE" });
-
-    // 2. Revert to original and capture viewport
-    await sendToContent({ type: "REVERT_TO_ORIGINAL" });
-    await new Promise((r) => setTimeout(r, 150));
-    const originalResult = await sendToBackground({ type: "CAPTURE_TAB" });
-    await sendToContent({ type: "RESTORE_EDITS" });
-
-    // 3. Compose side-by-side in content script
-    if (changedResult?.dataUrl && originalResult?.dataUrl) {
-      const composed = await sendToContent({
-        type: "COMPOSE_SIDE_BY_SIDE",
-        originalUrl: originalResult.dataUrl,
-        changedUrl: changedResult.dataUrl,
-      });
-      if (composed?.dataUrl) {
-        await sendToBackground({
-          type: "DOWNLOAD_DATA_URL",
-          dataUrl: composed.dataUrl,
-          filename: "web-screen-draft-viewport-compare-" + Date.now() + ".png",
-        });
-      }
-    }
-
-    setButtonLoading(ssSbsViewport, false);
+  blankCanvasBtn.addEventListener("click", () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("blank.html") });
+    window.close();
   });
 
   resetBtn.addEventListener("click", async () => {

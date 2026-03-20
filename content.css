@@ -10,6 +10,9 @@
   outline: 2px solid #4f46e5 !important;
   outline-offset: 2px !important;
 }
+.sd-selected.sd-line-selected {
+  outline: none !important;
+}
 
 /* Text editing mode — active inline editing */
 .sd-text-editing {
@@ -37,115 +40,285 @@
   z-index: 2147483640 !important;
 }
 
-/* ── Editor Toolbar ─────────────────────────────────────────────── */
-.sd-editor-bar {
+/* ── Toolbar Wrapper ───────────────────────────────────────────── */
+.sd-toolbar-wrapper {
   position: fixed !important;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 12px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
   z-index: 2147483647 !important;
   display: flex !important;
-  gap: 4px !important;
-  background: #1e1b4b !important;
-  padding: 6px 8px !important;
-  border-radius: 12px !important;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.35) !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 6px !important;
   user-select: none !important;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  pointer-events: none !important;
 }
 
-.sd-editor-grip {
+.sd-toolbar-wrapper > * {
+  pointer-events: auto !important;
+}
+
+/* ── Main Toolbar ──────────────────────────────────────────────── */
+.sd-editor-bar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  background: #fff !important;
+  border: 1px solid #e0e0e0 !important;
+  padding: 4px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 1px 5px rgba(0,0,0,0.07), 0 3px 18px rgba(0,0,0,0.04) !important;
+}
+
+.sd-toolbar-grip {
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
   width: 14px !important;
   cursor: grab !important;
   flex-shrink: 0 !important;
-  opacity: 0.5 !important;
+  opacity: 0.4 !important;
   transition: opacity 0.15s !important;
   padding: 0 2px !important;
   border: none !important;
   background: none !important;
 }
 
-.sd-editor-grip:hover {
-  opacity: 1 !important;
+.sd-toolbar-grip:hover {
+  opacity: 0.8 !important;
 }
 
-.sd-editor-grip:active {
+.sd-toolbar-grip:active {
   cursor: grabbing !important;
 }
 
-.sd-editor-btn {
+.sd-toolbar-divider {
+  width: 1px !important;
+  height: 20px !important;
+  background: #e5e7eb !important;
+  margin: 0 2px !important;
+  flex-shrink: 0 !important;
+  align-self: center !important;
+}
+
+.sd-tool-btn {
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  width: 36px !important;
-  height: 36px !important;
+  width: 32px !important;
+  height: 32px !important;
   border: none !important;
-  border-radius: 8px !important;
+  border-radius: 7px !important;
   background: transparent !important;
-  color: rgba(255,255,255,0.6) !important;
+  color: #495057 !important;
   cursor: pointer !important;
-  transition: all 0.12s ease !important;
+  transition: background 0.1s ease, color 0.1s ease !important;
   padding: 0 !important;
+  position: relative !important;
 }
 
-.sd-editor-btn:hover {
-  background: rgba(255,255,255,0.12) !important;
-  color: #fff !important;
+.sd-tool-btn:hover {
+  background: #f1f3f5 !important;
+  color: #212529 !important;
 }
 
-.sd-editor-btn-active {
-  background: #4f46e5 !important;
-  color: #fff !important;
+.sd-tool-btn.active {
+  background: #e8deff !important;
+  color: #6741d9 !important;
 }
 
-.sd-editor-btn-active:hover {
-  background: #4338ca !important;
-}
-
-.sd-editor-sep {
-  width: 1px !important;
-  height: 20px !important;
-  background: rgba(255,255,255,0.15) !important;
-  margin: 0 2px !important;
-  flex-shrink: 0 !important;
-}
-
-.sd-editor-btn-toggle {
-  color: #ef4444 !important;
-  opacity: 1 !important;
-}
-
-.sd-editor-btn-toggle.sd-toggle-off {
-  opacity: 0.35 !important;
-}
-
-/* ── Shape Submenu ─────────────────────────────────────────────── */
-.sd-shape-submenu {
-  z-index: 2147483647 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 2px !important;
-  background: #1e1b4b !important;
-  padding: 6px !important;
-  border-radius: 10px !important;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.35) !important;
-  user-select: none !important;
+.sd-tool-key {
+  position: absolute !important;
+  bottom: 1px !important;
+  right: 2px !important;
+  font-size: 8px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  color: #adb5bd !important;
+  pointer-events: none !important;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
 }
 
-.sd-shape-submenu .sd-editor-btn {
-  width: auto !important;
-  gap: 8px !important;
-  padding: 6px 12px 6px 8px !important;
-  font-size: 12px !important;
-  font-weight: 500 !important;
+.sd-tool-btn.active .sd-tool-key {
+  color: #9775d9 !important;
 }
 
-.sd-shape-submenu .sd-editor-btn span {
-  color: inherit !important;
+.sd-tool-btn.active:hover {
+  background: #d8c9f7 !important;
+}
+
+.sd-tool-btn-toggle {
+  color: #e03131 !important;
+}
+
+.sd-tool-btn-toggle.sd-toggle-off {
+  opacity: 0.3 !important;
+}
+
+/* ── Sub Toolbar (Properties Panel) ────────────────────────────── */
+.sd-subtoolbar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  background: #fff !important;
+  border: 1px solid #e0e0e0 !important;
+  padding: 8px 14px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 1px 5px rgba(0,0,0,0.07), 0 3px 18px rgba(0,0,0,0.04) !important;
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+.sd-prop-section {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.sd-prop-label {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #868e96 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.4px !important;
+  margin-right: 4px !important;
+  white-space: nowrap !important;
+}
+
+.sd-prop-divider {
+  width: 1px !important;
+  height: 22px !important;
+  background: #e5e7eb !important;
+  flex-shrink: 0 !important;
+}
+
+/* Color swatch buttons */
+.sd-color-btn {
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 5px !important;
+  border: 1.5px solid rgba(0,0,0,0.08) !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  transition: transform 0.1s ease, border-color 0.1s ease !important;
+  box-sizing: border-box !important;
+  flex-shrink: 0 !important;
+}
+
+.sd-color-btn:hover {
+  transform: scale(1.2) !important;
+  border-color: rgba(0,0,0,0.2) !important;
+}
+
+.sd-color-btn.active {
+  border-color: #6741d9 !important;
+  box-shadow: 0 0 0 1.5px #6741d9 !important;
+  transform: scale(1.1) !important;
+}
+
+.sd-color-btn.transparent-swatch {
+  background: #fff !important;
+  border-color: #ced4da !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.sd-color-btn.transparent-swatch::after {
+  content: '' !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: -2px !important;
+  right: -2px !important;
+  height: 1.5px !important;
+  background: #e03131 !important;
+  transform: rotate(-45deg) !important;
+  transform-origin: center !important;
+}
+
+.sd-color-btn.transparent-swatch.active {
+  border-color: #6741d9 !important;
+}
+
+/* Stroke width buttons */
+.sd-width-btn {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 30px !important;
+  height: 26px !important;
+  border: 1px solid #dee2e6 !important;
+  border-radius: 5px !important;
+  background: #fff !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  transition: all 0.1s ease !important;
+}
+
+.sd-width-btn:hover {
+  border-color: #a78bfa !important;
+  background: #f8f9fa !important;
+}
+
+.sd-width-btn.active {
+  background: #e8deff !important;
+  border-color: #6741d9 !important;
+}
+
+/* Stroke style buttons */
+.sd-style-btn {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 34px !important;
+  height: 26px !important;
+  border: 1px solid #dee2e6 !important;
+  border-radius: 5px !important;
+  background: #fff !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  transition: all 0.1s ease !important;
+}
+
+.sd-style-btn:hover {
+  border-color: #a78bfa !important;
+  background: #f8f9fa !important;
+}
+
+.sd-style-btn.active {
+  background: #e8deff !important;
+  border-color: #6741d9 !important;
+}
+
+/* Font size buttons */
+.sd-size-btn {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 26px !important;
+  padding: 0 8px !important;
+  border: 1px solid #dee2e6 !important;
+  border-radius: 5px !important;
+  background: #fff !important;
+  cursor: pointer !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #495057 !important;
+  transition: all 0.1s ease !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+.sd-size-btn:hover {
+  border-color: #a78bfa !important;
+  background: #f8f9fa !important;
+}
+
+.sd-size-btn.active {
+  background: #e8deff !important;
+  border-color: #6741d9 !important;
+  color: #6741d9 !important;
 }
 
 /* ── SVG Drawing Overlay ───────────────────────────────────────── */
@@ -156,18 +329,16 @@
 
 /* ── Eraser Tool ───────────────────────────────────────────────── */
 .sd-eraser-active,
-.sd-eraser-active *:not(.sd-editor-bar):not(.sd-editor-bar *):not(.sd-shape-submenu):not(.sd-shape-submenu *):not(.sd-editor-grip) {
+.sd-eraser-active *:not(.sd-toolbar-wrapper):not(.sd-toolbar-wrapper *):not(.sd-subtoolbar):not(.sd-subtoolbar *) {
   cursor: none !important;
 }
 
-.sd-eraser-active .sd-editor-bar,
-.sd-eraser-active .sd-editor-bar *,
-.sd-eraser-active .sd-shape-submenu,
-.sd-eraser-active .sd-shape-submenu * {
+.sd-eraser-active .sd-toolbar-wrapper,
+.sd-eraser-active .sd-toolbar-wrapper * {
   cursor: pointer !important;
 }
 
-.sd-eraser-active .sd-editor-grip {
+.sd-eraser-active .sd-toolbar-grip {
   cursor: grab !important;
 }
 
@@ -184,22 +355,18 @@
   transition: none !important;
 }
 
-.sd-eraser-trail {
-  position: absolute !important;
+.sd-eraser-trail-svg {
   pointer-events: none !important;
   z-index: 2147483638 !important;
-  border-radius: 50% !important;
-  background: rgba(239, 68, 68, 0.15) !important;
 }
 
 /* Hide extension UI during screenshot capture */
 .sd-capturing .sd-resize-handle,
 .sd-capturing .sd-rotate-handle,
 .sd-capturing .sd-resize-handle-container,
-.sd-capturing .sd-editor-bar,
-.sd-capturing .sd-shape-submenu,
+.sd-capturing .sd-toolbar-wrapper,
 .sd-capturing .sd-svg-overlay,
 .sd-capturing .sd-eraser-cursor,
-.sd-capturing .sd-eraser-trail {
+.sd-capturing .sd-eraser-trail-svg {
   display: none !important;
 }

@@ -1,6 +1,11 @@
 (function () {
   "use strict";
 
+  // Clean up previous instance (e.g., after extension reload)
+  if (window.__sdCleanup) {
+    try { window.__sdCleanup(); } catch (e) {}
+  }
+
   // ─── State ───────────────────────────────────────────────────────────
   const state = {
     editActive: false,
@@ -8,37 +13,89 @@
     hoveredEl: null,
     dragging: false,
     dragData: null,
-    undoStack: [],   // each entry: { type, ...data } — one logical action
+    undoStack: [],
+    redoStack: [],
     pastedItems: [],
     resizeTarget: null,
     textEditing: null,
     textEditInfo: null,
     clipboardEl: null,
-    activeTool: "select",  // select | rect | circle | arrow | line | draw | text | eraser
+    activeTool: "select",
+    strokeColor: "#1e1e1e",
+    backgroundColor: "transparent",
+    strokeWidth: 2,
+    strokeStyle: "solid",
+    fontSize: 20,
     drawingData: null,
   };
 
-  function createToolbar() {}
-  function showToolbar() {}
-  function hideToolbar() {}
+  // Forward declarations — overridden after actual definitions exist
+  function createToolbar() { if (typeof createEditorBar === "function") createEditorBar(); }
+  function hideToolbar() { hideStatusToast(); }
+  let _statusToast = null;
+  function showToolbar(msg) {
+    if (!msg) return;
+    if (_statusToast) { _statusToast.remove(); _statusToast = null; }
+    const el = document.createElement("div");
+    el.textContent = msg;
+    Object.assign(el.style, {
+      position: "fixed", bottom: "24px", left: "50%", transform: "translateX(-50%)",
+      background: "rgba(30,30,30,0.88)", color: "#fff", padding: "8px 18px",
+      borderRadius: "8px", fontSize: "13px", fontFamily: "-apple-system,BlinkMacSystemFont,sans-serif",
+      zIndex: "2147483647", pointerEvents: "none", whiteSpace: "nowrap",
+      transition: "opacity .3s", opacity: "1",
+    });
+    document.body.appendChild(el);
+    _statusToast = el;
+  }
+  function hideStatusToast() {
+    if (_statusToast) {
+      _statusToast.style.opacity = "0";
+      const el = _statusToast;
+      setTimeout(() => el.remove(), 300);
+      _statusToast = null;
+    }
+  }
 
   // ─── Utility ─────────────────────────────────────────────────────────
+  function isBlankCanvas() {
+    return location.pathname.endsWith("blank.html");
+  }
+
+  function getContentBounds() {
+    const els = document.querySelectorAll(".sd-pasted");
+    let maxX = window.innerWidth;
+    let maxY = window.innerHeight;
+    els.forEach((el) => {
+      if (!el.isConnected) return;
+      const left = parseFloat(el.style.left) || 0;
+      const top = parseFloat(el.style.top) || 0;
+      const w = el.offsetWidth || parseFloat(el.style.width) || 0;
+      const h = el.offsetHeight || parseFloat(el.style.height) || 0;
+      maxX = Math.max(maxX, left + w + 20);
+      maxY = Math.max(maxY, top + h + 20);
+    });
+    return { width: Math.ceil(maxX), height: Math.ceil(maxY) };
+  }
+
   function isExtensionEl(el) {
     if (!el) return false;
     return (
       el.classList?.contains("sd-pasted") ||
       el.classList?.contains("sd-resize-handle") ||
       el.classList?.contains("sd-rotate-handle") ||
+      el.classList?.contains("sd-line-handle") ||
+
       el.classList?.contains("sd-text-overlay") ||
       el.classList?.contains("sd-editor-bar") ||
-      el.classList?.contains("sd-editor-grip") ||
+      el.classList?.contains("sd-toolbar-grip") ||
       el.classList?.contains("sd-svg-overlay") ||
       el.classList?.contains("sd-eraser-cursor") ||
-      el.classList?.contains("sd-eraser-trail") ||
+      el.classList?.contains("sd-eraser-trail-svg") ||
       el.closest?.(".sd-pasted") ||
       el.closest?.(".sd-resize-handle-container") ||
-      el.closest?.(".sd-editor-bar") ||
-      el.closest?.(".sd-shape-submenu")
+      el.closest?.(".sd-toolbar-wrapper") ||
+      el.closest?.(".sd-subtoolbar")
     );
   }
 
@@ -62,6 +119,7 @@
 
   function pushUndo(action) {
     state.undoStack.push(action);
+    state.redoStack = [];
   }
 
   function getActionEl(action) {
@@ -80,6 +138,27 @@
 
     clearSelection();
     const action = state.undoStack.pop();
+
+    // Snapshot current values for redo
+    switch (action.type) {
+      case "move":
+      case "resize":
+        action._newStyles = action.styles.map((s) => ({ el: s.el, prop: s.prop, value: s.el.style[s.prop] }));
+        break;
+      case "textEdit":
+        action._newValue = action.el.innerHTML;
+        break;
+      case "rotate":
+        action._newTransform = action.el.style.transform;
+        break;
+      case "lineEdit":
+        action._newHTML = action.el.innerHTML;
+        action._newLeft = action.el.style.left;
+        action._newTop = action.el.style.top;
+        action._newWidth = action.el.style.width;
+        action._newHeight = action.el.style.height;
+        break;
+    }
 
     switch (action.type) {
       case "move": {
@@ -144,26 +223,140 @@
         }
         break;
       }
+      case "lineEdit": {
+        action.el.innerHTML = action.oldHTML;
+        action.el.style.left = action.oldLeft;
+        action.el.style.top = action.oldTop;
+        action.el.style.width = action.oldWidth;
+        action.el.style.height = action.oldHeight;
+        if (!state.undoStack.some((a) => getActionEl(a) === action.el)) {
+          action.el.classList.remove("sd-text-edited");
+        }
+        break;
+      }
     }
 
-    showToolbar("Undone");
+    state.redoStack.push(action);
+    showToolbar("Undone — Ctrl+Shift+Z to redo");
+    setTimeout(hideToolbar, 1500);
+  }
+
+  function redoLast() {
+    if (state.textEditing) return;
+    if (state.redoStack.length === 0) {
+      showToolbar("Nothing to redo");
+      setTimeout(hideToolbar, 1000);
+      return;
+    }
+
+    clearSelection();
+    const action = state.redoStack.pop();
+
+    switch (action.type) {
+      case "move":
+      case "resize": {
+        if (action._newStyles) {
+          action._newStyles.forEach((s) => { s.el.style[s.prop] = s.value; });
+        }
+        const el = action.styles[0]?.el;
+        if (el && !el.classList.contains("sd-pasted")) {
+          el.classList.add("sd-text-edited");
+        }
+        break;
+      }
+      case "paste": {
+        (action.parent || document.body).appendChild(action.el);
+        state.pastedItems.push(action.el);
+        break;
+      }
+      case "textEdit": {
+        if (action._newValue != null) action.el.innerHTML = action._newValue;
+        if (!action.el.classList.contains("sd-pasted")) {
+          action.el.classList.add("sd-text-edited");
+        }
+        break;
+      }
+      case "textWrap": {
+        // Cannot reliably redo textWrap
+        break;
+      }
+      case "delete": {
+        if (action.isPasted) {
+          const idx = state.pastedItems.indexOf(action.el);
+          if (idx !== -1) state.pastedItems.splice(idx, 1);
+          if (action.el.isConnected) action.el.remove();
+        } else {
+          action.el.style.display = "none";
+        }
+        break;
+      }
+      case "rotate": {
+        if (action._newTransform != null) action.el.style.transform = action._newTransform;
+        if (!action.el.classList.contains("sd-pasted")) {
+          action.el.classList.add("sd-text-edited");
+        }
+        break;
+      }
+      case "lineEdit": {
+        if (action._newHTML != null) action.el.innerHTML = action._newHTML;
+        if (action._newLeft != null) action.el.style.left = action._newLeft;
+        if (action._newTop != null) action.el.style.top = action._newTop;
+        if (action._newWidth != null) action.el.style.width = action._newWidth;
+        if (action._newHeight != null) action.el.style.height = action._newHeight;
+        if (!action.el.classList.contains("sd-pasted")) {
+          action.el.classList.add("sd-text-edited");
+        }
+        break;
+      }
+    }
+
+    state.undoStack.push(action);
+    showToolbar("Redone");
     setTimeout(hideToolbar, 1000);
   }
 
   function clearSelection() {
     if (state.selectedEl) {
-      state.selectedEl.classList.remove("sd-selected");
+      state.selectedEl.classList.remove("sd-selected", "sd-line-selected");
       removeResizeHandles();
       state.selectedEl = null;
+      updateSubToolbar();
     }
+  }
+
+  function detectElementType(el) {
+    if (!el) return null;
+    if (!el.classList.contains("sd-pasted") && !el.classList.contains("sd-drawn")) return null;
+    // Text-only pasted element (no SVG)
+    if (!el.querySelector("svg") && hasTextContent(el)) return "text";
+    const svg = el.querySelector("svg");
+    if (!svg) return null;
+    if (svg.querySelector("rect")) return "rect";
+    if (svg.querySelector("ellipse, circle")) return "circle";
+    if (svg.querySelector("polyline")) return "arrow";
+    if (svg.querySelector("line") && !svg.querySelector("polyline")) return "line";
+    if (svg.querySelector("path")) return "draw";
+    return null;
   }
 
   function selectElement(el) {
     clearSelection();
     state.selectedEl = el;
     el.classList.add("sd-selected");
-    addResizeHandles(el);
-    showToolbar("Selected — drag to move, corners to resize");
+
+    const elType = detectElementType(el);
+    if (elType === "line" || elType === "arrow") {
+      el.classList.add("sd-line-selected");
+      addLineHandles(el);
+    } else {
+      addResizeHandles(el);
+    }
+
+    if (elType && TOOL_PROPS[elType]) {
+      showSubToolbarForType(elType, el);
+    } else {
+      updateSubToolbar();
+    }
   }
 
   // ─── Element Selection (hover + click) ──────────────────────────────
@@ -227,6 +420,7 @@
     }
 
     document.removeEventListener("keydown", onTextEditKeydown, true);
+    el.removeEventListener("input", onTextInput);
 
     // If shape text overlay is empty, remove it
     if (info && info.shapeContainer && !el.textContent.trim()) {
@@ -244,6 +438,10 @@
     state.textEditing = null;
     state.textEditInfo = null;
     hideToolbar();
+  }
+
+  function onTextInput() {
+    positionResizeOverlay();
   }
 
   function onTextEditKeydown(e) {
@@ -311,6 +509,7 @@
       textOverlay.focus();
 
       document.addEventListener("keydown", onTextEditKeydown, true);
+      textOverlay.addEventListener("input", onTextInput);
       showToolbar("Type inside shape — click outside to commit, Esc to cancel");
       return;
     }
@@ -337,6 +536,7 @@
       pastedEl.focus();
 
       document.addEventListener("keydown", onTextEditKeydown, true);
+      pastedEl.addEventListener("input", onTextInput);
 
       showToolbar("Editing text — click outside to commit, Esc to cancel");
       return;
@@ -367,6 +567,7 @@
     el.focus();
 
     document.addEventListener("keydown", onTextEditKeydown, true);
+    el.addEventListener("input", onTextInput);
 
     showToolbar("Editing text — click outside to commit, Esc to cancel");
   }
@@ -380,8 +581,8 @@
 
   // ─── Drag & Move ────────────────────────────────────────────────────
   function onDragStart(e) {
-    if (!state.editActive || !state.selectedEl || state.textEditing) return;
-
+    if (!state.editActive || state.textEditing) return;
+    if (!state.selectedEl) return;
     const el = state.selectedEl;
     if (e.target !== el && !el.contains(e.target) && !isExtensionEl(e.target)) return;
     if (e.target.classList?.contains("sd-resize-handle") || e.target.classList?.contains("sd-rotate-handle")) return;
@@ -452,7 +653,9 @@
       const dy = Math.abs(parseFloat(state.dragData.el.style.top) - state.dragData.origTop);
       if (dx > 1 || dy > 1) {
         pushUndo({ type: "move", styles: state.dragData.savedStyles });
-        state.dragData.el.classList.add("sd-text-edited");
+        if (!state.dragData.el.classList.contains("sd-pasted")) {
+          state.dragData.el.classList.add("sd-text-edited");
+        }
       }
     }
     state.dragData = null;
@@ -591,6 +794,10 @@
 
   function positionResizeOverlay() {
     if (!resizeHandleContainer || !state.resizeTarget) return;
+    if (resizeHandleContainer.classList.contains("sd-line-handles")) {
+      positionLineHandles();
+      return;
+    }
     const rect = state.resizeTarget.getBoundingClientRect();
     Object.assign(resizeHandleContainer.style, {
       top: (rect.top + window.scrollY) + "px",
@@ -765,7 +972,9 @@
       const newTransform = d.el.style.transform || "";
       if (newTransform !== d.oldTransform) {
         pushUndo({ type: "rotate", el: d.el, oldTransform: d.oldTransform });
-        d.el.classList.add("sd-text-edited");
+        if (!d.el.classList.contains("sd-pasted")) {
+          d.el.classList.add("sd-text-edited");
+        }
       }
     }
     rotateData = null;
@@ -972,7 +1181,9 @@
       const movedH = Math.abs(parseFloat(d.target.style.height) - d.origHeight);
       if (movedW > 1 || movedH > 1) {
         pushUndo({ type: "resize", styles: d.savedStyles });
-        d.target.classList.add("sd-text-edited");
+        if (!d.target.classList.contains("sd-pasted")) {
+          d.target.classList.add("sd-text-edited");
+        }
       }
     }
     resizeData = null;
@@ -981,6 +1192,192 @@
     if (state.resizeTarget) {
       positionResizeOverlay();
     }
+  }
+
+  // ─── Line / Arrow Endpoint Handles ──────────────────────────────────
+  function getLineEndpoints(container) {
+    const svg = container.querySelector("svg");
+    if (!svg) return null;
+    const vb = svg.getAttribute("viewBox").split(" ").map(Number);
+    const left = parseFloat(container.style.left);
+    const top = parseFloat(container.style.top);
+    const g = svg.querySelector("g");
+    const lineEl = g ? g.querySelector("line") : svg.querySelector("line");
+    if (!lineEl) return null;
+    const x1 = parseFloat(lineEl.getAttribute("x1"));
+    const y1 = parseFloat(lineEl.getAttribute("y1"));
+    const x2 = parseFloat(lineEl.getAttribute("x2"));
+    const y2 = parseFloat(lineEl.getAttribute("y2"));
+    const offsetX = left - vb[0];
+    const offsetY = top - vb[1];
+    return {
+      x1: x1 + offsetX, y1: y1 + offsetY,
+      x2: x2 + offsetX, y2: y2 + offsetY,
+      isArrow: !!svg.querySelector("polyline"),
+    };
+  }
+
+  function rebuildLineFromEndpoints(container, x1, y1, x2, y2) {
+    const svg = container.querySelector("svg");
+    const g = svg.querySelector("g");
+    const isArrow = !!svg.querySelector("polyline");
+    const pad = 4;
+    const w = Math.max(Math.abs(x2 - x1), 1) + pad * 2;
+    const h = Math.max(Math.abs(y2 - y1), 1) + pad * 2;
+    const vbX = Math.min(x1, x2) - pad;
+    const vbY = Math.min(y1, y2) - pad;
+
+    container.style.left = vbX + "px";
+    container.style.top = vbY + "px";
+    container.style.width = w + "px";
+    container.style.height = h + "px";
+    svg.setAttribute("viewBox", vbX + " " + vbY + " " + w + " " + h);
+
+    const lineEl = g ? g.querySelector("line") : svg.querySelector("line");
+    lineEl.setAttribute("x1", x1);
+    lineEl.setAttribute("y1", y1);
+    lineEl.setAttribute("x2", x2);
+    lineEl.setAttribute("y2", y2);
+
+    if (isArrow) {
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      const headLen = 14;
+      const a1x = x2 - headLen * Math.cos(angle - Math.PI / 6);
+      const a1y = y2 - headLen * Math.sin(angle - Math.PI / 6);
+      const a2x = x2 - headLen * Math.cos(angle + Math.PI / 6);
+      const a2y = y2 - headLen * Math.sin(angle + Math.PI / 6);
+      svg.querySelector("polyline").setAttribute(
+        "points", a1x + "," + a1y + " " + x2 + "," + y2 + " " + a2x + "," + a2y
+      );
+    }
+  }
+
+  const LINE_HANDLE_SIZE = 14;
+
+  function addLineHandles(el) {
+    removeResizeHandles();
+    state.resizeTarget = el;
+    const endpoints = getLineEndpoints(el);
+    if (!endpoints) return;
+
+    resizeHandleContainer = document.createElement("div");
+    resizeHandleContainer.className = "sd-resize-handle-container sd-line-handles";
+    Object.assign(resizeHandleContainer.style, {
+      position: "absolute",
+      top: "0", left: "0", width: "0", height: "0",
+      pointerEvents: "none",
+      zIndex: "2147483645",
+    });
+
+    ["start", "end"].forEach((which) => {
+      const handle = document.createElement("div");
+      handle.className = "sd-line-handle";
+      handle.dataset.endpoint = which;
+      const px = which === "start" ? endpoints.x1 : endpoints.x2;
+      const py = which === "start" ? endpoints.y1 : endpoints.y2;
+      Object.assign(handle.style, {
+        position: "absolute",
+        width: LINE_HANDLE_SIZE + "px",
+        height: LINE_HANDLE_SIZE + "px",
+        background: "#4f46e5",
+        border: "2px solid #fff",
+        borderRadius: "50%",
+        cursor: "crosshair",
+        pointerEvents: "auto",
+        zIndex: "2147483646",
+        boxSizing: "border-box",
+        left: (px - LINE_HANDLE_SIZE / 2) + "px",
+        top: (py - LINE_HANDLE_SIZE / 2) + "px",
+      });
+      handle.addEventListener("mousedown", onLineHandleStart);
+      resizeHandleContainer.appendChild(handle);
+    });
+
+    document.body.appendChild(resizeHandleContainer);
+  }
+
+  function positionLineHandles() {
+    if (!resizeHandleContainer || !state.resizeTarget) return;
+    const endpoints = getLineEndpoints(state.resizeTarget);
+    if (!endpoints) return;
+    const handles = resizeHandleContainer.querySelectorAll(".sd-line-handle");
+    handles.forEach((h) => {
+      const which = h.dataset.endpoint;
+      const px = which === "start" ? endpoints.x1 : endpoints.x2;
+      const py = which === "start" ? endpoints.y1 : endpoints.y2;
+      h.style.left = (px - LINE_HANDLE_SIZE / 2) + "px";
+      h.style.top = (py - LINE_HANDLE_SIZE / 2) + "px";
+    });
+  }
+
+  let lineHandleData = null;
+
+  function onLineHandleStart(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!state.resizeTarget) return;
+    const el = state.resizeTarget;
+    const which = e.target.dataset.endpoint;
+    const endpoints = getLineEndpoints(el);
+    if (!endpoints) return;
+
+    lineHandleData = {
+      el,
+      which,
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      origX: which === "start" ? endpoints.x1 : endpoints.x2,
+      origY: which === "start" ? endpoints.y1 : endpoints.y2,
+      otherX: which === "start" ? endpoints.x2 : endpoints.x1,
+      otherY: which === "start" ? endpoints.y2 : endpoints.y1,
+      savedHTML: el.innerHTML,
+      savedLeft: el.style.left,
+      savedTop: el.style.top,
+      savedWidth: el.style.width,
+      savedHeight: el.style.height,
+    };
+    document.addEventListener("mousemove", onLineHandleMove, true);
+    document.addEventListener("mouseup", onLineHandleEnd, true);
+  }
+
+  function onLineHandleMove(e) {
+    if (!lineHandleData) return;
+    e.preventDefault();
+    const d = lineHandleData;
+    const dx = e.clientX - d.startMouseX;
+    const dy = e.clientY - d.startMouseY;
+    const newX = d.origX + dx;
+    const newY = d.origY + dy;
+    let x1, y1, x2, y2;
+    if (d.which === "start") {
+      x1 = newX; y1 = newY; x2 = d.otherX; y2 = d.otherY;
+    } else {
+      x1 = d.otherX; y1 = d.otherY; x2 = newX; y2 = newY;
+    }
+    rebuildLineFromEndpoints(d.el, x1, y1, x2, y2);
+    positionLineHandles();
+  }
+
+  function onLineHandleEnd(e) {
+    document.removeEventListener("mousemove", onLineHandleMove, true);
+    document.removeEventListener("mouseup", onLineHandleEnd, true);
+    if (lineHandleData) {
+      const d = lineHandleData;
+      const moved = Math.abs(e.clientX - d.startMouseX) + Math.abs(e.clientY - d.startMouseY);
+      if (moved > 1) {
+        pushUndo({
+          type: "lineEdit",
+          el: d.el,
+          oldHTML: d.savedHTML,
+          oldLeft: d.savedLeft,
+          oldTop: d.savedTop,
+          oldWidth: d.savedWidth,
+          oldHeight: d.savedHeight,
+        });
+        d.el.classList.add("sd-text-edited");
+      }
+    }
+    lineHandleData = null;
   }
 
   // ─── Screenshot Prep ────────────────────────────────────────────────
@@ -1078,6 +1475,7 @@
       if (el.isConnected) el.remove();
     });
     state.pastedItems = [];
+    state.redoStack = [];
 
     document.querySelectorAll(".sd-hover-highlight").forEach((el) => {
       el.classList.remove("sd-hover-highlight");
@@ -1170,8 +1568,12 @@
   // ─── Eraser ─────────────────────────────────────────────────────────
   let eraserCursor = null;
   let eraserDragging = false;
-  let eraserTrails = [];
+  let eraserTrailSvg = null;
+  let eraserTrailEl = null;
+  let eraserTrailPoints = [];
+  let eraserTrailTimeout = null;
   const ERASER_RADIUS = 14;
+  const ERASER_TAIL_LEN = 24;
 
   function createEraserCursor() {
     if (eraserCursor) return;
@@ -1182,34 +1584,170 @@
 
   function removeEraserCursor() {
     if (eraserCursor) { eraserCursor.remove(); eraserCursor = null; }
-    removeEraserTrails();
+    removeEraserTrail();
   }
 
-  function removeEraserTrails() {
-    eraserTrails.forEach((t) => t.remove());
-    eraserTrails = [];
+  function removeEraserTrail() {
+    if (eraserTrailTimeout) { clearTimeout(eraserTrailTimeout); eraserTrailTimeout = null; }
+    if (eraserTrailSvg) { eraserTrailSvg.remove(); eraserTrailSvg = null; eraserTrailEl = null; }
+    eraserTrailPoints = [];
   }
 
   function moveEraserCursor(e) {
     if (!eraserCursor) return;
     eraserCursor.style.left = e.clientX + "px";
     eraserCursor.style.top = e.clientY + "px";
-    const overToolbar = e.target.closest?.(".sd-editor-bar") || e.target.closest?.(".sd-shape-submenu");
+    const overToolbar = e.target.closest?.(".sd-toolbar-wrapper");
     eraserCursor.style.opacity = overToolbar ? "0" : "1";
   }
 
-  function addEraserTrail(x, y) {
-    const dot = document.createElement("div");
-    dot.className = "sd-eraser-trail";
-    const size = ERASER_RADIUS * 2;
-    Object.assign(dot.style, {
-      left: (x + window.scrollX - ERASER_RADIUS) + "px",
-      top: (y + window.scrollY - ERASER_RADIUS) + "px",
-      width: size + "px",
-      height: size + "px",
+  function buildTaperPolygon(pts, maxW) {
+    if (pts.length < 2) return "";
+    const count = pts.length;
+    const left = [];
+    const right = [];
+    for (let i = 0; i < count; i++) {
+      const t = count > 1 ? i / (count - 1) : 1;
+      const halfW = (t * t) * (maxW / 2);
+      const p = pts[i];
+      let dx = 0, dy = -1;
+      if (i < count - 1) {
+        dx = pts[i + 1].x - p.x;
+        dy = pts[i + 1].y - p.y;
+      } else {
+        dx = p.x - pts[i - 1].x;
+        dy = p.y - pts[i - 1].y;
+      }
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+      left.push({ x: p.x + nx * halfW, y: p.y + ny * halfW });
+      right.push({ x: p.x - nx * halfW, y: p.y - ny * halfW });
+    }
+    right.reverse();
+    const all = left.concat(right);
+    return "M" + all.map((p) => p.x + "," + p.y).join(" L") + " Z";
+  }
+
+  function startEraserTrail(x, y) {
+    removeEraserTrail();
+    eraserTrailSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    eraserTrailSvg.setAttribute("class", "sd-eraser-trail-svg");
+    Object.assign(eraserTrailSvg.style, {
+      position: "absolute",
+      top: "0",
+      left: "0",
+      width: document.documentElement.scrollWidth + "px",
+      height: document.documentElement.scrollHeight + "px",
+      zIndex: "2147483638",
+      pointerEvents: "none",
+      overflow: "visible",
     });
-    document.body.appendChild(dot);
-    eraserTrails.push(dot);
+    eraserTrailEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    eraserTrailEl.setAttribute("fill", "rgba(239, 68, 68, 0.35)");
+    eraserTrailEl.setAttribute("stroke", "none");
+    eraserTrailSvg.appendChild(eraserTrailEl);
+    document.body.appendChild(eraserTrailSvg);
+    eraserTrailPoints = [{ x: x + window.scrollX, y: y + window.scrollY }];
+  }
+
+  function extendEraserTrail(x, y) {
+    if (!eraserTrailEl) return;
+    eraserTrailPoints.push({ x: x + window.scrollX, y: y + window.scrollY });
+    if (eraserTrailPoints.length > ERASER_TAIL_LEN) {
+      eraserTrailPoints = eraserTrailPoints.slice(-ERASER_TAIL_LEN);
+    }
+    eraserTrailEl.setAttribute("d", buildTaperPolygon(eraserTrailPoints, ERASER_RADIUS * 2));
+  }
+
+  function revertElementEdits(el) {
+    const relevantUndos = [];
+    for (let i = state.undoStack.length - 1; i >= 0; i--) {
+      const action = state.undoStack[i];
+      const actionEl = getActionEl(action);
+      if (actionEl === el) {
+        relevantUndos.push(i);
+      }
+    }
+    for (const idx of relevantUndos) {
+      const action = state.undoStack[idx];
+      switch (action.type) {
+        case "move":
+        case "resize":
+          action.styles.forEach((s) => { s.el.style[s.prop] = s.oldValue; });
+          break;
+        case "rotate":
+          action.el.style.transform = action.oldTransform;
+          break;
+        case "textEdit":
+          action.el.innerHTML = action.oldValue;
+          break;
+        case "lineEdit":
+          action.el.innerHTML = action.oldHTML;
+          action.el.style.left = action.oldLeft;
+          action.el.style.top = action.oldTop;
+          action.el.style.width = action.oldWidth;
+          action.el.style.height = action.oldHeight;
+          break;
+        case "delete":
+          if (!action.isPasted && action.el.style.display === "none") {
+            action.el.style.display = action.oldDisplay || "";
+          }
+          break;
+      }
+      state.undoStack.splice(idx, 1);
+    }
+    if (relevantUndos.length > 0) {
+      el.classList.remove("sd-text-edited");
+    }
+  }
+
+  function distToSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+  }
+
+  function isEraserHittingElement(ex, ey, el) {
+    const type = detectElementType(el);
+    if (type !== "line" && type !== "arrow") return true;
+    const svg = el.querySelector("svg");
+    if (!svg) return true;
+    const rect = el.getBoundingClientRect();
+    const vb = svg.getAttribute("viewBox").split(" ").map(Number);
+    const sx = rect.width / vb[2];
+    const sy = rect.height / vb[3];
+    const lineEl = svg.querySelector("g > line") || svg.querySelector("line");
+    if (!lineEl) return true;
+    const lx1 = parseFloat(lineEl.getAttribute("x1"));
+    const ly1 = parseFloat(lineEl.getAttribute("y1"));
+    const lx2 = parseFloat(lineEl.getAttribute("x2"));
+    const ly2 = parseFloat(lineEl.getAttribute("y2"));
+    const vx1 = rect.left + (lx1 - vb[0]) * sx;
+    const vy1 = rect.top + (ly1 - vb[1]) * sy;
+    const vx2 = rect.left + (lx2 - vb[0]) * sx;
+    const vy2 = rect.top + (ly2 - vb[1]) * sy;
+    const strokeW = parseFloat(lineEl.getAttribute("stroke-width") || "2");
+    if (distToSegment(ex, ey, vx1, vy1, vx2, vy2) <= strokeW / 2) return true;
+    if (type === "arrow") {
+      const polyline = svg.querySelector("polyline");
+      if (polyline) {
+        const pts = polyline.getAttribute("points").split(/[\s,]+/).map(Number);
+        if (pts.length >= 6) {
+          const ax1 = rect.left + (pts[0] - vb[0]) * sx;
+          const ay1 = rect.top + (pts[1] - vb[1]) * sy;
+          const ax2 = rect.left + (pts[2] - vb[0]) * sx;
+          const ay2 = rect.top + (pts[3] - vb[1]) * sy;
+          const ax3 = rect.left + (pts[4] - vb[0]) * sx;
+          const ay3 = rect.top + (pts[5] - vb[1]) * sy;
+          if (distToSegment(ex, ey, ax1, ay1, ax2, ay2) <= strokeW / 2) return true;
+          if (distToSegment(ex, ey, ax2, ay2, ax3, ay3) <= strokeW / 2) return true;
+        }
+      }
+    }
+    return false;
   }
 
   function eraseElementsAtPoint(x, y) {
@@ -1220,12 +1758,15 @@
       bottom: y + ERASER_RADIUS,
     };
 
+    let erased = false;
+
     const toErase = [];
     state.pastedItems.forEach((el) => {
       if (!el.isConnected) return;
       const r = el.getBoundingClientRect();
       if (r.right >= eraserRect.left && r.left <= eraserRect.right &&
           r.bottom >= eraserRect.top && r.top <= eraserRect.bottom) {
+        if (!isEraserHittingElement(x, y, el)) return;
         toErase.push(el);
       }
     });
@@ -1236,22 +1777,28 @@
       const parent = el.parentNode || document.body;
       el.remove();
       pushUndo({ type: "delete", el, parent, isPasted: true });
+      erased = true;
     });
 
-    document.querySelectorAll(".sd-text-edited").forEach((el) => {
-      if (el.closest(".sd-pasted")) return;
-      const r = el.getBoundingClientRect();
-      if (r.right >= eraserRect.left && r.left <= eraserRect.right &&
-          r.bottom >= eraserRect.top && r.top <= eraserRect.bottom) {
-        const undoEntry = state.undoStack.find((a) => a.type === "textEdit" && a.el === el);
-        if (undoEntry) {
-          el.innerHTML = undoEntry.oldValue;
-          el.classList.remove("sd-text-edited");
-        }
-      }
+    const pastedSet = new Set(state.pastedItems);
+    const toRevert = new Set();
+    for (let i = state.undoStack.length - 1; i >= 0; i--) {
+      const action = state.undoStack[i];
+      if (!action) continue;
+      const actionEl = getActionEl(action);
+      if (!actionEl || !actionEl.isConnected || pastedSet.has(actionEl) || toRevert.has(actionEl)) continue;
+      const r = actionEl.getBoundingClientRect();
+      if (r.right < eraserRect.left || r.left > eraserRect.right ||
+          r.bottom < eraserRect.top || r.top > eraserRect.bottom) continue;
+      if (!isEraserHittingElement(x, y, actionEl)) continue;
+      toRevert.add(actionEl);
+    }
+    toRevert.forEach((actionEl) => {
+      revertElementEdits(actionEl);
+      erased = true;
     });
 
-    return toErase.length > 0;
+    return erased;
   }
 
   function onEraserMouseDown(e) {
@@ -1261,7 +1808,7 @@
     e.stopPropagation();
     eraserDragging = true;
     clearSelection();
-    addEraserTrail(e.clientX, e.clientY);
+    startEraserTrail(e.clientX, e.clientY);
     eraseElementsAtPoint(e.clientX, e.clientY);
     document.addEventListener("mousemove", onEraserMouseMove, true);
     document.addEventListener("mouseup", onEraserMouseUp, true);
@@ -1270,7 +1817,7 @@
   function onEraserMouseMove(e) {
     if (!eraserDragging) return;
     e.preventDefault();
-    addEraserTrail(e.clientX, e.clientY);
+    extendEraserTrail(e.clientX, e.clientY);
     eraseElementsAtPoint(e.clientX, e.clientY);
   }
 
@@ -1278,13 +1825,15 @@
     eraserDragging = false;
     document.removeEventListener("mousemove", onEraserMouseMove, true);
     document.removeEventListener("mouseup", onEraserMouseUp, true);
-    setTimeout(() => {
-      eraserTrails.forEach((t) => {
-        t.style.transition = "opacity 0.4s";
-        t.style.opacity = "0";
-      });
-      setTimeout(removeEraserTrails, 400);
-    }, 200);
+    if (eraserTrailEl) {
+      const fadingSvg = eraserTrailSvg;
+      eraserTrailEl.style.transition = "opacity 0.4s";
+      eraserTrailEl.style.opacity = "0";
+      eraserTrailSvg = null;
+      eraserTrailEl = null;
+      eraserTrailPoints = [];
+      eraserTrailTimeout = setTimeout(() => { if (fadingSvg) fadingSvg.remove(); eraserTrailTimeout = null; }, 400);
+    }
   }
 
   // ─── Delete Element ────────────────────────────────────────────────
@@ -1313,6 +1862,49 @@
     setTimeout(hideToolbar, 1500);
   }
 
+
+  // ─── SVG Rasterization (for html2canvas compatibility) ──────────────
+  function rasterizeDrawnSvgs() {
+    const entries = [];
+    document.querySelectorAll(".sd-drawn").forEach((container) => {
+      const svg = container.querySelector("svg");
+      if (!svg) return;
+      const w = container.offsetWidth || parseInt(container.style.width) || 100;
+      const h = container.offsetHeight || parseInt(container.style.height) || 100;
+      const clone = svg.cloneNode(true);
+      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      clone.setAttribute("width", w);
+      clone.setAttribute("height", h);
+      entries.push({ container, svg, w, h, clone });
+    });
+    return Promise.all(entries.map((entry) => {
+      return new Promise((resolve) => {
+        const svgStr = new XMLSerializer().serializeToString(entry.clone);
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement("canvas");
+          c.width = entry.w;
+          c.height = entry.h;
+          c.style.cssText = "width:100%;height:100%;display:block;";
+          c.getContext("2d").drawImage(img, 0, 0, entry.w, entry.h);
+          entry.container.replaceChild(c, entry.svg);
+          entry.canvas = c;
+          resolve(entry);
+        };
+        img.onerror = () => resolve(entry);
+        img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgStr);
+      });
+    }));
+  }
+
+  function restoreDrawnSvgs(entries) {
+    entries.forEach((entry) => {
+      if (entry.canvas && entry.canvas.parentElement === entry.container) {
+        entry.container.replaceChild(entry.svg, entry.canvas);
+      }
+    });
+  }
+
   // ─── Full Page Screenshot (html2canvas) ────────────────────────────
   function takeFullPageScreenshot(showHighlights) {
     exitTextEditing();
@@ -1338,19 +1930,36 @@
       return Promise.resolve(null);
     }
 
-    return html2canvas(document.body, {
+    let scrollW, scrollH;
+    if (isBlankCanvas()) {
+      const bounds = getContentBounds();
+      scrollW = bounds.width;
+      scrollH = bounds.height;
+    } else {
+      scrollW = document.documentElement.scrollWidth;
+      scrollH = document.documentElement.scrollHeight;
+    }
+    const opts = {
       useCORS: true,
       allowTaint: true,
       scrollX: 0,
       scrollY: 0,
-      windowWidth: document.documentElement.scrollWidth,
-      windowHeight: document.documentElement.scrollHeight,
-      width: document.documentElement.scrollWidth,
-      height: document.documentElement.scrollHeight,
-    }).then((canvas) => {
-      restoreAfterScreenshot();
-      return canvas.toDataURL("image/png");
+      windowWidth: scrollW,
+      windowHeight: scrollH,
+      width: scrollW,
+      height: scrollH,
+    };
+
+    let svgEntries = [];
+    return rasterizeDrawnSvgs().then((entries) => {
+      svgEntries = entries;
+      return html2canvas(document.body, opts).then((canvas) => {
+        restoreDrawnSvgs(svgEntries);
+        restoreAfterScreenshot();
+        return canvas.toDataURL("image/png");
+      });
     }).catch(() => {
+      restoreDrawnSvgs(svgEntries);
       restoreAfterScreenshot();
       return null;
     });
@@ -1437,6 +2046,12 @@
     exitTextEditing();
     clearSelection();
     hideToolbar();
+    if (state.hoveredEl) {
+      state.hoveredEl.classList.remove("sd-hover-highlight");
+    }
+    document.querySelectorAll(".sd-hover-highlight, .sd-selected, .sd-text-editing, .sd-text-edited").forEach((el) => {
+      el.classList.remove("sd-hover-highlight", "sd-selected", "sd-text-editing", "sd-text-edited");
+    });
 
     // Snapshot every element that will be modified
     const pastedSnapshots = state.pastedItems
@@ -1550,23 +2165,28 @@
 
     if (typeof html2canvas === "undefined") return Promise.resolve(null);
 
-    // 1. Capture the CHANGED version
+    // 1. Capture the CHANGED version — always hide highlights for side-by-side
     document.body.classList.add("sd-capturing");
-    if (!showHighlights) {
-      state.pastedItems.forEach((el) => {
-        if (el.isConnected) {
-          el.dataset.sdBorder = el.style.border;
-          el.style.border = "none";
-        }
-      });
-      document.querySelectorAll(".sd-text-edited").forEach((el) => {
-        el.classList.remove("sd-text-edited");
-        el.classList.add("sd-text-edited-hidden");
-      });
-    }
+    state.pastedItems.forEach((el) => {
+      if (el.isConnected) {
+        el.dataset.sdBorder = el.style.border;
+        el.style.border = "none";
+      }
+    });
+    document.querySelectorAll(".sd-text-edited").forEach((el) => {
+      el.classList.remove("sd-text-edited");
+      el.classList.add("sd-text-edited-hidden");
+    });
 
-    const scrollW = document.documentElement.scrollWidth;
-    const scrollH = document.documentElement.scrollHeight;
+    let scrollW, scrollH;
+    if (isBlankCanvas()) {
+      const bounds = getContentBounds();
+      scrollW = bounds.width;
+      scrollH = bounds.height;
+    } else {
+      scrollW = document.documentElement.scrollWidth;
+      scrollH = document.documentElement.scrollHeight;
+    }
     const opts = {
       useCORS: true,
       allowTaint: true,
@@ -1579,9 +2199,24 @@
     };
 
     let changedCanvas;
-    return html2canvas(document.body, opts).then((canvas) => {
+    let svgEntries;
+    return rasterizeDrawnSvgs().then((entries) => {
+      svgEntries = entries;
+      return html2canvas(document.body, opts);
+    }).then((canvas) => {
       changedCanvas = canvas;
+      restoreDrawnSvgs(svgEntries);
       restoreAfterScreenshot();
+
+      if (isBlankCanvas()) {
+        const origCanvas = document.createElement("canvas");
+        origCanvas.width = changedCanvas.width;
+        origCanvas.height = changedCanvas.height;
+        const ctx = origCanvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, origCanvas.width, origCanvas.height);
+        return composeSideBySide(origCanvas, changedCanvas);
+      }
 
       // 2. Snapshot all modified elements, then revert to original
       const pastedSnapshots = state.pastedItems
@@ -1605,6 +2240,14 @@
         if (action.type === "delete" && !action.isPasted && action.el.isConnected && !pastedSet.has(action.el)) {
           if (!snappedEls.has(action.el)) { snappedEls.add(action.el); editedSnapshots.push(snapshotElement(action.el)); }
         }
+      });
+
+      // Remove all edit indicators before capturing original
+      if (state.hoveredEl) {
+        state.hoveredEl.classList.remove("sd-hover-highlight");
+      }
+      document.querySelectorAll(".sd-hover-highlight, .sd-selected, .sd-text-editing").forEach((el) => {
+        el.classList.remove("sd-hover-highlight", "sd-selected", "sd-text-editing");
       });
 
       // Hide pasted items and revert non-pasted edits
@@ -1648,6 +2291,7 @@
         return composeSideBySide(origCanvas, changedCanvas);
       });
     }).catch(() => {
+      restoreDrawnSvgs(svgEntries || []);
       restoreAfterScreenshot();
       return null;
     });
@@ -1656,72 +2300,111 @@
   // ─── Editor Toolbar ─────────────────────────────────────────────────
   let editorBar = null;
   let svgOverlay = null;
-  let shapeSubmenu = null;
+  let toolbarWrapper = null;
+  let subToolbar = null;
+
+  const STROKE_COLORS = ["#1e1e1e", "#e03131", "#2f9e44", "#1971c2", "#f08c00", "#6741d9", "#ffffff"];
+  const BG_COLORS = ["transparent", "#ffffff", "#ffc9c9", "#b2f2bb", "#a5d8ff", "#ffec99", "#d0bfff"];
+  const STROKE_WIDTHS = [
+    { value: 1, label: "Thin" },
+    { value: 2, label: "Normal" },
+    { value: 4, label: "Bold" },
+  ];
+  const STROKE_STYLES_OPT = [
+    { value: "solid", label: "Solid" },
+    { value: "dashed", label: "Dashed" },
+    { value: "dotted", label: "Dotted" },
+  ];
+  const FONT_SIZES = [
+    { value: 16, label: "S" },
+    { value: 20, label: "M" },
+    { value: 28, label: "L" },
+    { value: 36, label: "XL" },
+  ];
+  const TOOL_PROPS = {
+    select: [],
+    rect: ["strokeColor", "backgroundColor", "strokeWidth", "strokeStyle"],
+    circle: ["strokeColor", "backgroundColor", "strokeWidth", "strokeStyle"],
+    arrow: ["strokeColor", "strokeWidth", "strokeStyle"],
+    line: ["strokeColor", "strokeWidth", "strokeStyle"],
+    draw: ["strokeColor", "strokeWidth"],
+    text: ["strokeColor", "fontSize"],
+    eraser: [],
+  };
 
   const TOOLS = [
-    { id: "select", label: "Selection", icon: '<path d="M4 2L4 14L8 10H13L4 2Z" fill="currentColor"/>' },
-    { id: "shape", label: "Shape", icon: '<rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>', submenu: [
-      { id: "rect", label: "Rectangle", icon: '<rect x="2" y="3" width="12" height="10" stroke="currentColor" stroke-width="1.5" fill="none"/>' },
-      { id: "circle", label: "Circle", icon: '<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/>' },
-    ]},
-    { id: "arrow", label: "Arrow", icon: '<line x1="3" y1="13" x2="13" y2="3" stroke="currentColor" stroke-width="1.5"/><polyline points="7,3 13,3 13,9" stroke="currentColor" stroke-width="1.5" fill="none"/>' },
-    { id: "line", label: "Line", icon: '<line x1="3" y1="13" x2="13" y2="3" stroke="currentColor" stroke-width="2"/>' },
-    { id: "draw", label: "Draw", icon: '<path d="M12.1 1.9L14.1 3.9L5 13H3V11L12.1 1.9Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/><path d="M3 13L2 14.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>' },
-    { id: "text", label: "Text", icon: '<text x="8" y="12" text-anchor="middle" font-size="12" font-weight="bold" font-family="sans-serif" fill="currentColor">T</text>' },
-    { id: "eraser", label: "Eraser", icon: '<path d="M3 13L9 3L14 7L8 13H3Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/><line x1="8" y1="13" x2="14" y2="13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="6.5" y1="8" x2="11.5" y2="5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>' },
+    { id: "select", label: "Selection", key: "1", icon: '<path d="M4 2L4 14L8 10H13L4 2Z" fill="currentColor"/>', group: 0 },
+    { id: "rect", label: "Rectangle", key: "2", icon: '<rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>', group: 1 },
+    { id: "circle", label: "Ellipse", key: "3", icon: '<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/>', group: 1 },
+    { id: "arrow", label: "Arrow", key: "4", icon: '<line x1="3" y1="13" x2="13" y2="3" stroke="currentColor" stroke-width="1.5"/><polyline points="7,3 13,3 13,9" stroke="currentColor" stroke-width="1.5" fill="none"/>', group: 2 },
+    { id: "line", label: "Line", key: "5", icon: '<line x1="3" y1="13" x2="13" y2="3" stroke="currentColor" stroke-width="2"/>', group: 2 },
+    { id: "draw", label: "Draw", key: "6", icon: '<path d="M12.1 1.9L14.1 3.9L5 13H3V11L12.1 1.9Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/><path d="M3 13L2 14.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>', group: 3 },
+    { id: "text", label: "Text", key: "7", icon: '<text x="8" y="12" text-anchor="middle" font-size="12" font-weight="bold" font-family="sans-serif" fill="currentColor">T</text>', group: 3 },
+    { id: "eraser", label: "Eraser", key: "8", icon: '<path d="M3 13L9 3L14 7L8 13H3Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/><line x1="8" y1="13" x2="14" y2="13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="6.5" y1="8" x2="11.5" y2="5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>', group: 4 },
   ];
+
+  function applyStrokeProps(svgEl, includeBackground) {
+    svgEl.setAttribute("stroke", state.strokeColor);
+    svgEl.setAttribute("stroke-width", String(state.strokeWidth));
+    if (state.strokeStyle === "dashed") svgEl.setAttribute("stroke-dasharray", "12,8");
+    else if (state.strokeStyle === "dotted") svgEl.setAttribute("stroke-dasharray", "2,8");
+    if (includeBackground) svgEl.setAttribute("fill", state.backgroundColor);
+  }
 
   function createEditorBar() {
     if (editorBar) return;
+
+    toolbarWrapper = document.createElement("div");
+    toolbarWrapper.className = "sd-toolbar-wrapper";
+
     editorBar = document.createElement("div");
     editorBar.className = "sd-editor-bar";
 
-    // Drag grip
     const grip = document.createElement("div");
-    grip.className = "sd-editor-grip";
-    grip.innerHTML = '<svg width="6" height="16" viewBox="0 0 6 16" fill="none">'
-      + '<circle cx="1.5" cy="3" r="1" fill="rgba(255,255,255,0.35)"/>'
-      + '<circle cx="4.5" cy="3" r="1" fill="rgba(255,255,255,0.35)"/>'
-      + '<circle cx="1.5" cy="7" r="1" fill="rgba(255,255,255,0.35)"/>'
-      + '<circle cx="4.5" cy="7" r="1" fill="rgba(255,255,255,0.35)"/>'
-      + '<circle cx="1.5" cy="11" r="1" fill="rgba(255,255,255,0.35)"/>'
-      + '<circle cx="4.5" cy="11" r="1" fill="rgba(255,255,255,0.35)"/>'
-      + '<circle cx="1.5" cy="15" r="1" fill="rgba(255,255,255,0.35)"/>'
-      + '<circle cx="4.5" cy="15" r="1" fill="rgba(255,255,255,0.35)"/>'
+    grip.className = "sd-toolbar-grip";
+    grip.innerHTML = '<svg width="8" height="14" viewBox="0 0 8 14" fill="none">'
+      + '<circle cx="2" cy="2" r="1.2" fill="#9ca3af"/>'
+      + '<circle cx="6" cy="2" r="1.2" fill="#9ca3af"/>'
+      + '<circle cx="2" cy="7" r="1.2" fill="#9ca3af"/>'
+      + '<circle cx="6" cy="7" r="1.2" fill="#9ca3af"/>'
+      + '<circle cx="2" cy="12" r="1.2" fill="#9ca3af"/>'
+      + '<circle cx="6" cy="12" r="1.2" fill="#9ca3af"/>'
       + '</svg>';
     grip.addEventListener("mousedown", onEditorBarDragStart);
     editorBar.appendChild(grip);
 
+    let lastGroup = -1;
     TOOLS.forEach((tool) => {
+      if (tool.group !== lastGroup && lastGroup !== -1) {
+        const divider = document.createElement("div");
+        divider.className = "sd-toolbar-divider";
+        editorBar.appendChild(divider);
+      }
+      lastGroup = tool.group;
+
       const btn = document.createElement("button");
-      btn.className = "sd-editor-btn" + (tool.id === "select" ? " sd-editor-btn-active" : "");
+      btn.className = "sd-tool-btn" + (tool.id === state.activeTool ? " active" : "");
       btn.dataset.tool = tool.id;
-      btn.title = tool.label;
-      btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 16 16" fill="none">' + tool.icon + '</svg>';
+      btn.title = tool.label + (tool.key ? " (" + tool.key + ")" : "");
+      btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 16 16" fill="none">' + tool.icon + '</svg>'
+        + (tool.key ? '<span class="sd-tool-key">' + tool.key + '</span>' : '');
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        if (tool.submenu) {
-          toggleShapeSubmenu(btn);
-        } else {
-          setActiveTool(tool.id);
-          hideShapeSubmenu();
-        }
+        setActiveTool(tool.id);
       });
       editorBar.appendChild(btn);
     });
 
-    // Separator + highlight toggle
     const sep = document.createElement("div");
-    sep.className = "sd-editor-sep";
+    sep.className = "sd-toolbar-divider";
     editorBar.appendChild(sep);
 
     const toggleBtn = document.createElement("button");
-    toggleBtn.className = "sd-editor-btn sd-editor-btn-toggle";
-    toggleBtn.title = "Toggle red highlights";
+    toggleBtn.className = "sd-tool-btn sd-tool-btn-toggle";
+    toggleBtn.title = "Toggle edit highlights";
     toggleBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 16 16" fill="none">'
-      + '<path d="M8 1C4.7 1 2 3.7 2 7c0 2.4 1.5 4.5 3.5 5.3V14h5v-1.7C12.5 11.5 14 9.4 14 7c0-3.3-2.7-6-6-6z" stroke="currentColor" stroke-width="1.3" fill="none"/>'
-      + '<line x1="5.5" y1="14" x2="10.5" y2="14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'
-      + '<circle cx="8" cy="7" r="2" fill="currentColor"/>'
+      + '<path d="M8 2C5 2 2.7 4.7 1 8c1.7 3.3 4 6 7 6s5.3-2.7 7-6c-1.7-3.3-4-6-7-6z" stroke="currentColor" stroke-width="1.3" fill="none"/>'
+      + '<circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.3" fill="none"/>'
       + '</svg>';
     toggleBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1730,8 +2413,338 @@
     });
     editorBar.appendChild(toggleBtn);
 
-    document.body.appendChild(editorBar);
+    subToolbar = document.createElement("div");
+    subToolbar.className = "sd-subtoolbar";
+
+    toolbarWrapper.appendChild(editorBar);
+    toolbarWrapper.appendChild(subToolbar);
+    document.body.appendChild(toolbarWrapper);
+
+    updateSubToolbar();
   }
+
+  function updateSubToolbar() {
+    if (!subToolbar) return;
+    const props = TOOL_PROPS[state.activeTool] || [];
+    subToolbar.innerHTML = "";
+
+    if (props.length === 0) {
+      subToolbar.style.cssText = "display: none !important;";
+      return;
+    }
+    subToolbar.style.cssText = "";
+
+    props.forEach((prop, i) => {
+      if (i > 0) {
+        const divider = document.createElement("div");
+        divider.className = "sd-prop-divider";
+        subToolbar.appendChild(divider);
+      }
+
+      const section = document.createElement("div");
+      section.className = "sd-prop-section";
+
+      switch (prop) {
+        case "strokeColor": {
+          const label = document.createElement("span");
+          label.className = "sd-prop-label";
+          label.textContent = "Stroke";
+          section.appendChild(label);
+          STROKE_COLORS.forEach((color) => {
+            const btn = document.createElement("button");
+            btn.className = "sd-color-btn" + (state.strokeColor === color ? " active" : "");
+            btn.style.cssText = "background: " + color + " !important;"
+              + (color === "#ffffff" ? " border-color: #ced4da !important;" : "");
+            btn.title = color;
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              state.strokeColor = color;
+              updateSubToolbar();
+            });
+            section.appendChild(btn);
+          });
+          break;
+        }
+        case "backgroundColor": {
+          const label = document.createElement("span");
+          label.className = "sd-prop-label";
+          label.textContent = "Fill";
+          section.appendChild(label);
+          BG_COLORS.forEach((color) => {
+            const btn = document.createElement("button");
+            const isTransparent = color === "transparent";
+            btn.className = "sd-color-btn" + (isTransparent ? " transparent-swatch" : "") + (state.backgroundColor === color ? " active" : "");
+            if (!isTransparent) {
+              const border = color === "#ffffff" ? "border-color: #ced4da !important;" : "";
+              btn.style.cssText = "background: " + color + " !important;" + border;
+            }
+            btn.title = isTransparent ? "No fill" : color;
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              state.backgroundColor = color;
+              updateSubToolbar();
+            });
+            section.appendChild(btn);
+          });
+          break;
+        }
+        case "strokeWidth": {
+          const label = document.createElement("span");
+          label.className = "sd-prop-label";
+          label.textContent = "Width";
+          section.appendChild(label);
+          STROKE_WIDTHS.forEach((opt) => {
+            const btn = document.createElement("button");
+            btn.className = "sd-width-btn" + (state.strokeWidth === opt.value ? " active" : "");
+            btn.title = opt.label;
+            btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20"><line x1="4" y1="10" x2="16" y2="10" stroke="#374151" stroke-width="' + opt.value + '" stroke-linecap="round"/></svg>';
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              state.strokeWidth = opt.value;
+              updateSubToolbar();
+            });
+            section.appendChild(btn);
+          });
+          break;
+        }
+        case "strokeStyle": {
+          const label = document.createElement("span");
+          label.className = "sd-prop-label";
+          label.textContent = "Style";
+          section.appendChild(label);
+          STROKE_STYLES_OPT.forEach((opt) => {
+            const btn = document.createElement("button");
+            btn.className = "sd-style-btn" + (state.strokeStyle === opt.value ? " active" : "");
+            btn.title = opt.label;
+            let dashAttr = "";
+            if (opt.value === "dashed") dashAttr = ' stroke-dasharray="6,4"';
+            else if (opt.value === "dotted") dashAttr = ' stroke-dasharray="2,4"';
+            btn.innerHTML = '<svg width="28" height="20" viewBox="0 0 28 20"><line x1="4" y1="10" x2="24" y2="10" stroke="#374151" stroke-width="2" stroke-linecap="round"' + dashAttr + '/></svg>';
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              state.strokeStyle = opt.value;
+              updateSubToolbar();
+            });
+            section.appendChild(btn);
+          });
+          break;
+        }
+        case "fontSize": {
+          const label = document.createElement("span");
+          label.className = "sd-prop-label";
+          label.textContent = "Size";
+          section.appendChild(label);
+          FONT_SIZES.forEach((opt) => {
+            const btn = document.createElement("button");
+            btn.className = "sd-size-btn" + (state.fontSize === opt.value ? " active" : "");
+            btn.textContent = opt.label;
+            btn.title = opt.value + "px";
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              state.fontSize = opt.value;
+              updateSubToolbar();
+            });
+            section.appendChild(btn);
+          });
+          break;
+        }
+      }
+      subToolbar.appendChild(section);
+    });
+  }
+
+  function readElementProps(el) {
+    const svg = el.querySelector("svg");
+    const shape = svg && (svg.querySelector("rect, ellipse, circle, line, polyline, path"));
+    if (!shape && !el.classList.contains("sd-pasted")) return {};
+    const result = {};
+    if (shape) {
+      result.stroke = shape.getAttribute("stroke") || "#1e1e1e";
+      result.strokeWidth = parseFloat(shape.getAttribute("stroke-width")) || 2;
+      const da = shape.getAttribute("stroke-dasharray") || "";
+      if (da.startsWith("12")) result.strokeStyle = "dashed";
+      else if (da.startsWith("2")) result.strokeStyle = "dotted";
+      else result.strokeStyle = "solid";
+      const fill = shape.getAttribute("fill");
+      result.fill = (fill && fill !== "none") ? fill : "transparent";
+    } else {
+      const cs = window.getComputedStyle(el);
+      result.stroke = cs.color || "#1e1e1e";
+      result.fontSize = parseInt(cs.fontSize) || 20;
+    }
+    return result;
+  }
+
+  function applyPropToElement(el, propName, value) {
+    const svg = el.querySelector("svg");
+    const shapes = svg ? svg.querySelectorAll("rect, ellipse, circle, line, polyline, path") : [];
+    shapes.forEach((s) => {
+      switch (propName) {
+        case "strokeColor":
+          s.setAttribute("stroke", value);
+          break;
+        case "strokeWidth":
+          s.setAttribute("stroke-width", String(value));
+          break;
+        case "strokeStyle":
+          if (value === "dashed") s.setAttribute("stroke-dasharray", "12,8");
+          else if (value === "dotted") s.setAttribute("stroke-dasharray", "2,8");
+          else s.removeAttribute("stroke-dasharray");
+          break;
+        case "backgroundColor":
+            if (s.tagName === "rect" || s.tagName === "ellipse" || s.tagName === "circle") {
+            s.setAttribute("fill", value === "transparent" ? "none" : value);
+          }
+          break;
+      }
+    });
+    if (propName === "strokeColor" && shapes.length === 0) {
+      el.style.color = value;
+    }
+    if (propName === "fontSize" && shapes.length === 0) {
+      el.style.fontSize = value + "px";
+    }
+  }
+
+  function showSubToolbarForType(elType, el) {
+    if (!subToolbar) return;
+    const props = TOOL_PROPS[elType] || [];
+    subToolbar.innerHTML = "";
+
+    if (props.length === 0) {
+      subToolbar.style.cssText = "display: none !important;";
+      return;
+    }
+    subToolbar.style.cssText = "";
+
+    const current = readElementProps(el);
+
+    props.forEach((prop, i) => {
+      if (i > 0) {
+        const divider = document.createElement("div");
+        divider.className = "sd-prop-divider";
+        subToolbar.appendChild(divider);
+      }
+
+      const section = document.createElement("div");
+      section.className = "sd-prop-section";
+
+      switch (prop) {
+        case "strokeColor": {
+          const label = document.createElement("span");
+          label.className = "sd-prop-label";
+          label.textContent = "Stroke";
+          section.appendChild(label);
+          STROKE_COLORS.forEach((color) => {
+            const btn = document.createElement("button");
+            btn.className = "sd-color-btn" + (current.stroke === color ? " active" : "");
+            btn.style.cssText = "background: " + color + " !important;"
+              + (color === "#ffffff" ? " border-color: #ced4da !important;" : "");
+            btn.title = color;
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              applyPropToElement(el, "strokeColor", color);
+              state.strokeColor = color;
+              showSubToolbarForType(elType, el);
+            });
+            section.appendChild(btn);
+          });
+          break;
+        }
+        case "backgroundColor": {
+          const label = document.createElement("span");
+          label.className = "sd-prop-label";
+          label.textContent = "Fill";
+          section.appendChild(label);
+          BG_COLORS.forEach((color) => {
+            const btn = document.createElement("button");
+            const isTransparent = color === "transparent";
+            btn.className = "sd-color-btn" + (isTransparent ? " transparent-swatch" : "") + (current.fill === color ? " active" : "");
+            if (!isTransparent) {
+              const border = color === "#ffffff" ? "border-color: #ced4da !important;" : "";
+              btn.style.cssText = "background: " + color + " !important;" + border;
+            }
+            btn.title = isTransparent ? "No fill" : color;
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              applyPropToElement(el, "backgroundColor", color);
+              state.backgroundColor = color;
+              showSubToolbarForType(elType, el);
+            });
+            section.appendChild(btn);
+          });
+          break;
+        }
+        case "strokeWidth": {
+          const label = document.createElement("span");
+          label.className = "sd-prop-label";
+          label.textContent = "Width";
+          section.appendChild(label);
+          STROKE_WIDTHS.forEach((opt) => {
+            const btn = document.createElement("button");
+            btn.className = "sd-width-btn" + (current.strokeWidth === opt.value ? " active" : "");
+            btn.title = opt.label;
+            btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20"><line x1="4" y1="10" x2="16" y2="10" stroke="#374151" stroke-width="' + opt.value + '" stroke-linecap="round"/></svg>';
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              applyPropToElement(el, "strokeWidth", opt.value);
+              state.strokeWidth = opt.value;
+              showSubToolbarForType(elType, el);
+            });
+            section.appendChild(btn);
+          });
+          break;
+        }
+        case "strokeStyle": {
+          const label = document.createElement("span");
+          label.className = "sd-prop-label";
+          label.textContent = "Style";
+          section.appendChild(label);
+          STROKE_STYLES_OPT.forEach((opt) => {
+            const btn = document.createElement("button");
+            btn.className = "sd-style-btn" + (current.strokeStyle === opt.value ? " active" : "");
+            btn.title = opt.label;
+            let dashAttr = "";
+            if (opt.value === "dashed") dashAttr = ' stroke-dasharray="6,4"';
+            else if (opt.value === "dotted") dashAttr = ' stroke-dasharray="2,4"';
+            btn.innerHTML = '<svg width="28" height="20" viewBox="0 0 28 20"><line x1="4" y1="10" x2="24" y2="10" stroke="#374151" stroke-width="2" stroke-linecap="round"' + dashAttr + '/></svg>';
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              applyPropToElement(el, "strokeStyle", opt.value);
+              state.strokeStyle = opt.value;
+              showSubToolbarForType(elType, el);
+            });
+            section.appendChild(btn);
+          });
+          break;
+        }
+        case "fontSize": {
+          const label = document.createElement("span");
+          label.className = "sd-prop-label";
+          label.textContent = "Size";
+          section.appendChild(label);
+          const curSize = current.fontSize || state.fontSize;
+          FONT_SIZES.forEach((opt) => {
+            const btn = document.createElement("button");
+            btn.className = "sd-size-btn" + (curSize === opt.value ? " active" : "");
+            btn.textContent = opt.label;
+            btn.title = opt.value + "px";
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              applyPropToElement(el, "fontSize", opt.value);
+              state.fontSize = opt.value;
+              showSubToolbarForType(elType, el);
+            });
+            section.appendChild(btn);
+          });
+          break;
+        }
+      }
+      subToolbar.appendChild(section);
+    });
+
+  }
+
 
   // ─── Editor Bar Dragging ──────────────────────────────────────────
   let editorBarDrag = null;
@@ -1739,13 +2752,12 @@
   function onEditorBarDragStart(e) {
     e.preventDefault();
     e.stopPropagation();
-    if (!editorBar) return;
+    if (!toolbarWrapper) return;
 
-    const rect = editorBar.getBoundingClientRect();
-    editorBar.style.setProperty("left", rect.left + "px", "important");
-    editorBar.style.setProperty("top", rect.top + "px", "important");
-    editorBar.style.setProperty("bottom", "auto", "important");
-    editorBar.style.setProperty("transform", "none", "important");
+    const rect = toolbarWrapper.getBoundingClientRect();
+    toolbarWrapper.style.setProperty("left", rect.left + "px", "important");
+    toolbarWrapper.style.setProperty("top", rect.top + "px", "important");
+    toolbarWrapper.style.setProperty("transform", "none", "important");
 
     editorBarDrag = {
       startX: e.clientX,
@@ -1759,12 +2771,12 @@
   }
 
   function onEditorBarDragMove(e) {
-    if (!editorBarDrag || !editorBar) return;
+    if (!editorBarDrag || !toolbarWrapper) return;
     e.preventDefault();
     const dx = e.clientX - editorBarDrag.startX;
     const dy = e.clientY - editorBarDrag.startY;
-    editorBar.style.setProperty("left", (editorBarDrag.origLeft + dx) + "px", "important");
-    editorBar.style.setProperty("top", (editorBarDrag.origTop + dy) + "px", "important");
+    toolbarWrapper.style.setProperty("left", (editorBarDrag.origLeft + dx) + "px", "important");
+    toolbarWrapper.style.setProperty("top", (editorBarDrag.origTop + dy) + "px", "important");
   }
 
   function onEditorBarDragEnd() {
@@ -1774,59 +2786,17 @@
   }
 
   function removeEditorBar() {
-    if (editorBar) { editorBar.remove(); editorBar = null; }
-    hideShapeSubmenu();
+    if (toolbarWrapper) { toolbarWrapper.remove(); toolbarWrapper = null; editorBar = null; subToolbar = null; }
     removeSvgOverlay();
-  }
-
-  function toggleShapeSubmenu(anchorBtn) {
-    if (shapeSubmenu) { hideShapeSubmenu(); return; }
-    const shapeTool = TOOLS.find((t) => t.id === "shape");
-    if (!shapeTool || !shapeTool.submenu) return;
-
-    shapeSubmenu = document.createElement("div");
-    shapeSubmenu.className = "sd-shape-submenu";
-
-    shapeTool.submenu.forEach((sub) => {
-      const btn = document.createElement("button");
-      btn.className = "sd-editor-btn" + (state.activeTool === sub.id ? " sd-editor-btn-active" : "");
-      btn.dataset.tool = sub.id;
-      btn.title = sub.label;
-      btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 16 16" fill="none">' + sub.icon + '</svg><span>' + sub.label + '</span>';
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        setActiveTool(sub.id);
-        hideShapeSubmenu();
-      });
-      shapeSubmenu.appendChild(btn);
-    });
-
-    const rect = anchorBtn.getBoundingClientRect();
-    Object.assign(shapeSubmenu.style, {
-      position: "fixed",
-      top: (rect.bottom + 6) + "px",
-      left: rect.left + "px",
-    });
-    document.body.appendChild(shapeSubmenu);
-  }
-
-  function hideShapeSubmenu() {
-    if (shapeSubmenu) { shapeSubmenu.remove(); shapeSubmenu = null; }
-  }
-
-  function onClickCloseSubmenu(e) {
-    if (!shapeSubmenu) return;
-    if (e.target.closest?.(".sd-shape-submenu") || e.target.closest?.(".sd-editor-bar")) return;
-    hideShapeSubmenu();
   }
 
   function setActiveTool(toolId) {
     state.activeTool = toolId;
     if (editorBar) {
-      editorBar.querySelectorAll(".sd-editor-btn").forEach((b) => {
-        const id = b.dataset.tool;
-        const isShape = (toolId === "rect" || toolId === "circle");
-        b.classList.toggle("sd-editor-btn-active", id === toolId || (id === "shape" && isShape));
+      editorBar.querySelectorAll(".sd-tool-btn").forEach((b) => {
+        if (b.dataset.tool) {
+          b.classList.toggle("active", b.dataset.tool === toolId);
+        }
       });
     }
 
@@ -1852,6 +2822,8 @@
         svgOverlay.style.zIndex = "2147483639";
       }
     }
+
+    updateSubToolbar();
   }
 
   // ─── SVG Drawing Overlay ──────────────────────────────────────────
@@ -1895,8 +2867,8 @@
     if (state.activeTool === "draw") {
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
       path.setAttribute("d", "M" + x + "," + y);
-      path.setAttribute("stroke", "#dc2626");
-      path.setAttribute("stroke-width", "3");
+      path.setAttribute("stroke", state.strokeColor);
+      path.setAttribute("stroke-width", String(state.strokeWidth));
       path.setAttribute("fill", "none");
       path.setAttribute("stroke-linecap", "round");
       path.setAttribute("stroke-linejoin", "round");
@@ -1934,11 +2906,9 @@
       rect.setAttribute("y", Math.min(d.startY, y));
       rect.setAttribute("width", Math.abs(dx));
       rect.setAttribute("height", Math.abs(dy));
-      rect.setAttribute("stroke", "#dc2626");
-      rect.setAttribute("stroke-width", "2");
-      rect.setAttribute("fill", "none");
       rect.setAttribute("rx", "2");
       rect.setAttribute("vector-effect", "non-scaling-stroke");
+      applyStrokeProps(rect, true);
       svgOverlay.appendChild(rect);
       d.el = rect;
     } else if (state.activeTool === "circle") {
@@ -1947,10 +2917,8 @@
       ellipse.setAttribute("cy", d.startY + dy / 2);
       ellipse.setAttribute("rx", Math.abs(dx / 2));
       ellipse.setAttribute("ry", Math.abs(dy / 2));
-      ellipse.setAttribute("stroke", "#dc2626");
-      ellipse.setAttribute("stroke-width", "2");
-      ellipse.setAttribute("fill", "none");
       ellipse.setAttribute("vector-effect", "non-scaling-stroke");
+      applyStrokeProps(ellipse, true);
       svgOverlay.appendChild(ellipse);
       d.el = ellipse;
     } else if (state.activeTool === "line") {
@@ -1959,10 +2927,9 @@
       line.setAttribute("y1", d.startY);
       line.setAttribute("x2", x);
       line.setAttribute("y2", y);
-      line.setAttribute("stroke", "#dc2626");
-      line.setAttribute("stroke-width", "2");
       line.setAttribute("stroke-linecap", "round");
       line.setAttribute("vector-effect", "non-scaling-stroke");
+      applyStrokeProps(line, false);
       svgOverlay.appendChild(line);
       d.el = line;
     } else if (state.activeTool === "arrow") {
@@ -1972,10 +2939,9 @@
       line.setAttribute("y1", d.startY);
       line.setAttribute("x2", x);
       line.setAttribute("y2", y);
-      line.setAttribute("stroke", "#dc2626");
-      line.setAttribute("stroke-width", "2");
       line.setAttribute("stroke-linecap", "round");
       line.setAttribute("vector-effect", "non-scaling-stroke");
+      applyStrokeProps(line, false);
       g.appendChild(line);
 
       const angle = Math.atan2(y - d.startY, x - d.startX);
@@ -1986,12 +2952,11 @@
       const a2y = y - headLen * Math.sin(angle + Math.PI / 6);
       const head = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
       head.setAttribute("points", a1x + "," + a1y + " " + x + "," + y + " " + a2x + "," + a2y);
-      head.setAttribute("stroke", "#dc2626");
-      head.setAttribute("stroke-width", "2");
       head.setAttribute("fill", "none");
       head.setAttribute("stroke-linecap", "round");
       head.setAttribute("stroke-linejoin", "round");
       head.setAttribute("vector-effect", "non-scaling-stroke");
+      applyStrokeProps(head, false);
       g.appendChild(head);
 
       svgOverlay.appendChild(g);
@@ -2036,7 +3001,7 @@
     wrapper.appendChild(svgEl);
 
     const container = document.createElement("div");
-    container.className = "sd-pasted sd-drawn";
+    container.className = "sd-pasted sd-drawn" + (keepTool ? "" : " sd-text-edited");
     Object.assign(container.style, {
       position: "absolute",
       left: (bbox.x - pad) + "px",
@@ -2079,13 +3044,14 @@
       background: "transparent",
       border: "1px dashed #4f46e5",
       padding: "4px 8px",
-      fontSize: "16px",
+      fontSize: state.fontSize + "px",
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
       fontWeight: "normal",
-      color: "#000000",
+      color: state.strokeColor,
       cursor: "move",
-      minWidth: "40px",
-      maxWidth: "300px",
+      minWidth: "200px",
+      minHeight: "40px",
+      maxWidth: "500px",
       userSelect: "none",
       whiteSpace: "pre-wrap",
       wordWrap: "break-word",
@@ -2097,13 +3063,31 @@
 
     setActiveTool("select");
     selectElement(el);
-    showToolbar("Text placed — double-click to edit");
-    setTimeout(hideToolbar, 1500);
+
+    // Immediately enter text editing mode
+    el.style.userSelect = "text";
+    el.style.cursor = "text";
+    el.classList.add("sd-text-editing");
+    state.textEditing = el;
+    state.textEditInfo = { originalText: el.innerHTML, isPasted: true };
+    el.textContent = "";
+    el.focus();
+    document.addEventListener("keydown", onTextEditKeydown, true);
+    el.addEventListener("input", onTextInput);
   }
 
   // ─── Keyboard Shortcuts ────────────────────────────────────────────
   function onKeyDown(e) {
     if (!state.editActive) return;
+
+    // Ctrl+Shift+Z redo
+    if ((e.ctrlKey || e.metaKey) && e.key === "z" && e.shiftKey) {
+      if (state.textEditing) return;
+      e.preventDefault();
+      e.stopPropagation();
+      redoLast();
+      return;
+    }
 
     // Ctrl+Z undo
     if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
@@ -2161,6 +3145,16 @@
         return;
       }
     }
+
+    // Number keys 1-8 to switch tools (like Excalidraw)
+    if (!state.textEditing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const tool = TOOLS.find((t) => t.key === e.key);
+      if (tool) {
+        e.preventDefault();
+        setActiveTool(tool.id);
+        return;
+      }
+    }
   }
 
   // ─── Event Binding ──────────────────────────────────────────────────
@@ -2175,7 +3169,6 @@
     document.addEventListener("paste", onPaste, true);
     document.addEventListener("click", onClickOutsideTextEdit, false);
     document.addEventListener("keydown", onKeyDown, true);
-    document.addEventListener("click", onClickCloseSubmenu, true);
     createEditorBar();
   }
 
@@ -2190,7 +3183,6 @@
     document.removeEventListener("paste", onPaste, true);
     document.removeEventListener("click", onClickOutsideTextEdit, false);
     document.removeEventListener("keydown", onKeyDown, true);
-    document.removeEventListener("click", onClickCloseSubmenu, true);
     if (state.hoveredEl) {
       state.hoveredEl.classList.remove("sd-hover-highlight");
       state.hoveredEl = null;
@@ -2215,6 +3207,7 @@
     if (state.textEditing === pasted) return;
     e.preventDefault();
     e.stopPropagation();
+
     selectElement(pasted);
     const savedStyles = [
       { el: pasted, prop: "left", oldValue: pasted.style.left },
@@ -2232,6 +3225,7 @@
     };
     pasted.classList.add("sd-dragging");
   }, true);
+
 
   // ─── Message Handling ───────────────────────────────────────────────
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -2268,6 +3262,12 @@
       case "GET_STATE":
         sendResponse({
           editActive: state.editActive,
+        });
+        break;
+
+      case "HAS_CHANGES":
+        sendResponse({
+          hasChanges: state.undoStack.length > 0 || state.pastedItems.some((el) => el.isConnected),
         });
         break;
 
@@ -2315,8 +3315,22 @@
         break;
 
       default:
-        sendResponse({ ok: false });
+        return false;
     }
     return true;
   });
+
+  // Store cleanup function for future reloads
+  window.__sdCleanup = () => {
+    state.editActive = false;
+    disableEditListeners();
+    removeSvgOverlay();
+    if (_statusToast) { _statusToast.remove(); _statusToast = null; }
+    document.querySelectorAll(".sd-toolbar-wrapper, .sd-svg-overlay").forEach((el) => el.remove());
+  };
+
+  if (location.pathname.endsWith("blank.html")) {
+    state.editActive = true;
+    enableEditListeners();
+  }
 })();

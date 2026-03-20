@@ -6,73 +6,100 @@
 </head>
 <body>
   <div class="popup">
-    <header class="header">
-      <h1>Web Screen Draft</h1>
-      <span class="badge" id="statusBadge">OFF</span>
-    </header>
 
-    <section class="controls">
-      <button id="toggleEdit" class="btn btn-primary">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M11.5 1.5L14.5 4.5L5 14H2V11L11.5 1.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        </svg>
-        Enable Edit Mode
+    <div class="body">
+
+      <!-- Edit mode toggle -->
+      <button id="toggleEdit" class="power-btn">
+        <div class="power-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M12 3v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M7.5 6.8A8 8 0 1 0 16.5 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="power-text">
+          <span class="power-label">Edit Mode</span>
+          <span class="power-status" id="statusLabel">Off</span>
+        </div>
+        <div class="power-indicator" id="statusDot"></div>
       </button>
 
-      <hr class="divider">
+      <!-- Screenshot section -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Screenshot</span>
+          <label class="toggle-row">
+            <div class="toggle-left">
+              <span>Show Highlights</span>
+            </div>
+            <input type="checkbox" id="showHighlights" checked>
+            <span class="switch"></span>
+          </label>
+        </div>
 
-      <label class="toggle-row" id="highlightToggle">
-        <input type="checkbox" id="showHighlights">
-        <span>Show red highlights in screenshot</span>
-      </label>
+        <div class="seg-toggle" id="modeToggle">
+          <button class="seg-btn active" data-mode="changes">Changes only</button>
+          <button class="seg-btn" data-mode="sidebyside">Side by side</button>
+        </div>
 
-      <div class="section-label">Viewport</div>
-      <div class="btn-row">
-        <button id="screenshotViewport" class="btn btn-secondary">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <rect x="1" y="3" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/>
-            <circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+        <div class="btn-pair">
+          <button id="captureViewport" class="cap-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <rect x="2" y="4" width="20" height="14" rx="3" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="12" cy="11" r="3" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <span>Current Viewport</span>
+          </button>
+          <button id="captureFullPage" class="cap-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <rect x="5" y="1" width="14" height="22" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="8" y1="6" x2="16" y2="6" stroke="currentColor" stroke-width="1" opacity="0.4"/>
+              <line x1="8" y1="9" x2="14" y2="9" stroke="currentColor" stroke-width="1" opacity="0.4"/>
+              <line x1="8" y1="12" x2="16" y2="12" stroke="currentColor" stroke-width="1" opacity="0.25"/>
+            </svg>
+            <span>Full Page</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick actions -->
+      <div class="quick-row">
+        <button id="blankCanvas" class="quick-btn" title="Open a blank drawing canvas">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
-          Capture
+          <span>Blank Canvas</span>
         </button>
-        <button id="screenshotSbsViewport" class="btn btn-secondary">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <rect x="1" y="3" width="6" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/>
-            <rect x="9" y="3" width="6" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/>
+        <div class="quick-sep"></div>
+        <button id="resetChanges" class="quick-btn quick-danger" title="Reset all edits on this page">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+            <path d="M3 3v6h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M4 9a9 9 0 1 1-.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
-          Compare
+          <span>Reset All</span>
         </button>
       </div>
 
-      <div class="section-label">Full Page</div>
-      <div class="btn-row">
-        <button id="screenshotFullPage" class="btn btn-secondary">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <rect x="3" y="1" width="10" height="14" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
-            <line x1="5" y1="4" x2="11" y2="4" stroke="currentColor" stroke-width="1"/>
-            <line x1="5" y1="6.5" x2="11" y2="6.5" stroke="currentColor" stroke-width="1"/>
-          </svg>
-          Capture
-        </button>
-        <button id="screenshotSideBySide" class="btn btn-secondary">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <rect x="1" y="2" width="6" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/>
-            <rect x="9" y="2" width="6" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/>
-          </svg>
-          Compare
-        </button>
-      </div>
+    </div>
 
-      <hr class="divider">
-
-      <button id="resetChanges" class="btn btn-ghost">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M2 2V6H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M2.5 5.5A6 6 0 1 1 2 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    <!-- Footer -->
+    <footer class="foot">
+      <span class="shortcut-hint">
+        <kbd>&#8984;&#8679;E</kbd> toggle edit
+      </span>
+      <a href="https://buymeacoffee.com/tjindapitak" target="_blank" class="coffee" title="Buy me a coffee">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path d="M3 14c0 3.3 2.7 6 6 6h4c3.3 0 6-2.7 6-2V9H3v5z" fill="#ffdd00" stroke="#c8960c" stroke-width="1.2" stroke-linejoin="round"/>
+          <path d="M19 10c1.7 0 3 1.3 3 3s-1.3 3-3 3" stroke="#c8960c" stroke-width="1.2" stroke-linecap="round"/>
+          <path d="M3 9h16" stroke="#c8960c" stroke-width="1.2" stroke-linecap="round"/>
+          <path d="M8 6c0-.8.6-1.6 1.2-2" stroke="#ff6723" stroke-width="1.2" stroke-linecap="round"/>
+          <path d="M12 5c0-.8.6-1.6 1.2-2" stroke="#ff6723" stroke-width="1.2" stroke-linecap="round"/>
         </svg>
-        Reset All Changes
-      </button>
-    </section>
+        <span>Buy me a coffee</span>
+      </a>
+    </footer>
+
   </div>
   <script src="popup.js"></script>
 </body>

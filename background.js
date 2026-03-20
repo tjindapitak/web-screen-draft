@@ -9,6 +9,11 @@ async function ensureContentScripts(tabId) {
       return;
     }
   } catch {}
+  const tab = await chrome.tabs.get(tabId);
+  if (tab.url?.startsWith("chrome-extension://")) {
+    injectedTabs.add(tabId);
+    return;
+  }
   await chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] });
   await chrome.scripting.executeScript({ target: { tabId }, files: ["lib/html2canvas.min.js", "content.js"] });
   injectedTabs.add(tabId);
