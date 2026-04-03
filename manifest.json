@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Web Screen Draft",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Edit, annotate, draw, and screenshot any webpage with side-by-side comparisons.",
   "homepage_url": "https://github.com/tjindapitak/web-screen-draft",
   "author": "Thanapon Jindapitak",

@@ -21,6 +21,13 @@ async function ensureContentScripts(tabId) {
 
 chrome.tabs.onRemoved.addListener((tabId) => injectedTabs.delete(tabId));
 
+// Clear injection tracking when pages reload/navigate
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'loading') {
+    injectedTabs.delete(tabId);
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "INJECT_CONTENT_SCRIPTS") {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
